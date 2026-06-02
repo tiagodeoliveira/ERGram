@@ -1,0 +1,38 @@
+{
+  "package_id": "ergram.tiago.tools",
+  "edition": "202601",
+  "name": "ERGram",
+  "version": "0.1.1",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.10",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "g2-microphone",
+      "desc": "Capture audio from the glasses mic for push-to-talk voice messages (transcription)."
+    },
+    {
+      "name": "network",
+      "desc": "Stream microphone audio to Soniox for speech-to-text, and send and receive messages through your Telegram account.",
+      "whitelist": [
+        "wss://stt-rt.soniox.com",
+        "https://stt-rt.soniox.com",
+        "wss://pluto.web.telegram.org",
+        "wss://venus.web.telegram.org",
+        "wss://aurora.web.telegram.org",
+        "wss://vesta.web.telegram.org",
+        "wss://flora.web.telegram.org",
+        "https://pluto.web.telegram.org",
+        "https://venus.web.telegram.org",
+        "https://aurora.web.telegram.org",
+        "https://vesta.web.telegram.org",
+        "https://flora.web.telegram.org",
+        "http://192.168.5.142:5173",
+        "ws://192.168.5.142:5173",
+        "http://100.64.152.113:5173",
+        "ws://100.64.152.113:5173"
+      ]
+    }
+  ],
+  "supported_languages": ["en"]
+}

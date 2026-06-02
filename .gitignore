@@ -1,0 +1,14 @@
+# dependencies / build output
+node_modules
+dist
+*.ehpk
+
+# secrets & local env (never commit real keys or the Telegram session)
+.env
+.env.*
+
+# local tooling / OS cruft
+.claude
+.playwright-mcp
+.vite
+.DS_Store
