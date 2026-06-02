@@ -56,9 +56,15 @@ to talk.
 ```bash
 pnpm install
 pnpm run dev          # Vite dev server on :5173
+pnpm run sim          # Vite + the Even Hub simulator together (desktop)
 # QR for real glasses (or use the Even Realities app's dev mode → connect to the Vite URL):
 pnpm exec evenhub qr --url http://<your-lan-ip>:5173
 ```
+
+`pnpm run sim` starts the dev server and the Even Hub simulator side by side (the simulator waits for
+Vite, then connects to `http://localhost:5173`). To capture from a specific host microphone, set
+`ERGRAM_SIM_AID` (e.g. `ERGRAM_SIM_AID=pulse:default pnpm run sim`); unset, it uses the default input.
+`pnpm run simulate` runs just the simulator against an already-running dev server.
 
 GramJS needs Node globals in the browser: `vite-plugin-node-polyfills` provides process/global, and
 `src/buffer-global.ts` supplies a single `Buffer` from the `buffer` package (`resolve.dedupe: ['buffer']`
