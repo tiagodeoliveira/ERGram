@@ -3,13 +3,13 @@
   "description": "Talk on a Telegram group from Even Realities G2 smart glasses: push-to-talk voice, transcribed by Soniox and sent via a Telegram userbot.",
   "license": "MIT",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "pack": "vite build && evenhub pack app.json dist -o ergram.ehpk",
+    "pack": "pnpm build && evenhub pack app.json dist -o ergram.ehpk",
     "sim": "concurrently -n vite,sim -c blue,green \"vite\" \"wait-on http://localhost:5173 && evenhub-simulator http://localhost:5173 --automation-port 9898 ${ERGRAM_SIM_AID:+--aid $ERGRAM_SIM_AID}\"",
     "simulate": "evenhub-simulator http://localhost:5173"
   },

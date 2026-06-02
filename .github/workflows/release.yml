@@ -1,0 +1,56 @@
+name: Release
+
+# Build the .ehpk and publish it as a GitHub Release whenever a semver tag is pushed.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write # required to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app_version="$(jq -r .version app.json)"
+          pkg_version="$(jq -r .version package.json)"
+          echo "tag=$tag app.json=$app_version package.json=$pkg_version"
+          if [ "$tag" != "$app_version" ] || [ "$tag" != "$pkg_version" ]; then
+            echo "::error::Tag v$tag does not match app.json ($app_version) and package.json ($pkg_version)"
+            exit 1
+          fi
+
+      - name: Build and pack .ehpk
+        run: pnpm run pack
+
+      - name: Verify artifact exists
+        run: ls -lh ergram.ehpk
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" ergram.ehpk \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
