@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { senderLabel, topicIdOf } from './messages'
+import { senderLabel, topicIdOf, messagesToLog, type TgMessage } from './messages'
 
 describe('senderLabel', () => {
   it('prefers a non-empty first name', () => {
@@ -29,5 +29,31 @@ describe('topicIdOf', () => {
   it('treats a missing reply header as the General topic (1)', () => {
     expect(topicIdOf(undefined)).toBe(1)
     expect(topicIdOf({})).toBe(1)
+  })
+})
+
+describe('messagesToLog', () => {
+  const tg = (over: Partial<TgMessage>): TgMessage => ({
+    id: 0, text: '', mine: false, bot: false, from: '', chatId: '-100', topicId: 5, date: 0, ...over,
+  })
+
+  it('drops empty/whitespace (service) messages and trims text', () => {
+    const out = messagesToLog([
+      tg({ id: 1, text: 'hi', from: 'Alice' }),
+      tg({ id: 2, text: '   ' }),
+      tg({ id: 3, text: ' yo ', mine: true, from: '' }),
+    ])
+    expect(out).toEqual([
+      { id: 1, from: 'Alice', text: 'hi', mine: false },
+      { id: 3, from: '', text: 'yo', mine: true },
+    ])
+  })
+
+  it('preserves order', () => {
+    const out = messagesToLog([
+      tg({ id: 1, text: 'a', from: 'A' }),
+      tg({ id: 2, text: 'b', from: 'B' }),
+    ])
+    expect(out.map((m) => m.id)).toEqual([1, 2])
   })
 })
