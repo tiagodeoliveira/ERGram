@@ -17,13 +17,14 @@ import {
   hasTelegram,
   canChat,
 } from './settings'
-import { mountUi, setStatus, setTranscript, setReply, flashSaved } from './ui'
+import { mountUi, setStatus, setTranscript, flashSaved } from './ui'
 import { wrapToLines } from './glasses/wrap'
 import { getTextWidth } from '@evenrealities/pretext'
 import { TgClient } from './telegram/client'
-import { messagesToTurns } from './telegram/messages'
+import { messagesToLog, type TgMessage } from './telegram/messages'
 import type { Topic } from './telegram/topics'
-import type { Turn } from './conversation'
+import { upsertMsg, reconcileSend, type Msg } from './conversation'
+import { renderConversation } from './glasses/render'
 
 // ── Geometry & rules ──
 // Container is 576x288 with paddingLength 4 → 568px text width, 10 lines @ 27px.
@@ -42,12 +43,11 @@ function makeRule(ch: string): string {
   while (getTextWidth(s + ch) <= INNER_W - 6) s += ch
   return s
 }
-const TURN_DIVIDER = makeRule('━')
 const SPEAKER_DIVIDER = makeRule('─')
 const LISTENING_HEADER = `● Listening…   tap: send · 2-tap: cancel\n${SPEAKER_DIVIDER}`
 
 // ── Types ──
-type Mode = 'idle' | 'listening' | 'thinking'
+type Mode = 'idle' | 'listening'
 type View = 'convo' | 'picker'
 
 const bridge = await waitForEvenAppBridge()
@@ -57,8 +57,8 @@ let settings = await loadSettings(bridge)
 let tg: TgClient | null = null
 
 // ── Topic state. Each topic keeps its own scrollable conversation log. ──
-const histories = new Map<number, Turn[]>()
-function historyFor(id: number): Turn[] {
+const histories = new Map<number, Msg[]>()
+function historyFor(id: number): Msg[] {
   let h = histories.get(id)
   if (!h) {
     h = []
@@ -68,15 +68,14 @@ function historyFor(id: number): Turn[] {
 }
 
 let active: { topicId: number; title: string } | null = null
-let history: Turn[] = []
+let history: Msg[] = []
 
-// ── Awaiting-reply tracking ──
-// Simple approach: set awaitingReply=true when we send a message. When a bot
-// message arrives, commit the turn (or update the last committed turn if it's
-// an edit of the same message id). On the next send we reset and start fresh.
-let awaitingReply = false
-let pendingUserText = ''
-let replyMsgId: number | null = null
+// Optimistic placeholders use decreasing negative ids so they never collide
+// with real (positive) Telegram message ids.
+let localSeq = -1
+function nextLocalId(): number {
+  return localSeq--
+}
 
 // ── Turn / view state ──
 let mode: Mode = 'idle'
@@ -242,35 +241,20 @@ async function showTextContainer(content: string): Promise<void> {
   lastRender = content
 }
 
-// ── Turn rendering ──
-function renderTurn(t: Turn): string {
-  const head = `You: ${t.user}`
-  return t.reply ? `${head}\n${SPEAKER_DIVIDER}\n${t.reply}` : head
-}
-function renderActive(): string {
-  if (replyText || mode === 'thinking') {
-    return `You: ${transcriptText}\n${SPEAKER_DIVIDER}\n${replyText || '…'}`
-  }
-  if (transcriptText) return `You: ${transcriptText}`
-  return ''
-}
+// ── Flat-log rendering ──
 function listeningBody(): string {
   return transcriptText || '(speak now)'
 }
 function composeDoc(): string {
-  const blocks = history.map(renderTurn)
-  const activeBlock = renderActive()
-  if (activeBlock) blocks.push(activeBlock)
-  const doc = blocks.join(`\n${TURN_DIVIDER}\n`)
-  return doc || HINT_IDLE
+  return renderConversation(history, SPEAKER_DIVIDER) || HINT_IDLE
 }
-// Append a turn to a topic's log and trim it to the budget.
-function pushTurn(arr: Turn[], user: string, reply: string): void {
-  if (user || reply) arr.push({ user, reply })
-  let total = arr.reduce((n, t) => n + t.user.length + t.reply.length + 16, 0)
-  while (arr.length > 1 && total > HISTORY_CHAR_BUDGET) {
-    const dropped = arr.shift()!
-    total -= dropped.user.length + dropped.reply.length + 16
+// Upsert a message into a topic's log, then trim it to the scrollback budget.
+function appendMsg(log: Msg[], msg: Msg): void {
+  upsertMsg(log, msg)
+  let total = log.reduce((n, m) => n + m.from.length + m.text.length + 16, 0)
+  while (log.length > 1 && total > HISTORY_CHAR_BUDGET) {
+    const dropped = log.shift()!
+    total -= dropped.from.length + dropped.text.length + 16
   }
 }
 
@@ -362,7 +346,7 @@ async function stopListening(): Promise<void> {
   if (canChat(settings) && active) {
     sendTurn(text)
   } else {
-    pushTurn(history, text, '')
+    appendMsg(history, { id: nextLocalId(), from: '', text, mine: true })
     mode = 'idle'
     setStatus('idle', 'Transcribed · connect Telegram to chat')
     setDoc(composeDoc())
@@ -379,76 +363,55 @@ function sendTurn(userText: string): void {
   const topicId = active.topicId
   const target = historyFor(topicId)
 
-  // Reset reply tracking for this new send.
-  awaitingReply = true
-  pendingUserText = userText
-  replyMsgId = null
+  // Optimistic local echo for instant feedback; reconcile against the real id.
+  const tempId = nextLocalId()
+  appendMsg(target, { id: tempId, from: '', text: userText, mine: true })
 
-  mode = 'thinking'
+  mode = 'idle'
+  transcriptText = ''
   replyText = ''
   followTail = true
-  setStatus('thinking', 'Waiting for reply…')
-  setReply('')
-  setDoc(composeDoc())
+  setStatus('idle', `Ready · ${active.title}`)
+  if (active.topicId === topicId) {
+    history = target
+    setDoc(composeDoc())
+  }
 
-  // Send to Telegram and handle any immediate errors.
-  tg.sendToTopic(settings.tgGroupId, topicId, userText).catch((err: unknown) => {
-    // Only show error if we're still waiting on this same turn.
-    if (awaitingReply && active?.topicId === topicId) {
-      awaitingReply = false
-      pendingUserText = ''
-      // Push the user turn without a reply so it's not lost.
-      pushTurn(target, userText, '(send failed)')
+  tg.sendToTopic(settings.tgGroupId, topicId, userText)
+    .then((realId: number) => {
+      reconcileSend(target, tempId, realId)
       if (active?.topicId === topicId) {
-        history = historyFor(topicId)
-        transcriptText = ''
-        replyText = ''
-        mode = 'idle'
+        history = target
+        setDoc(composeDoc())
+      }
+    })
+    .catch((err: unknown) => {
+      const temp = target.find((m) => m.id === tempId)
+      if (temp) temp.text = `${userText}  (send failed)`
+      if (active?.topicId === topicId) {
+        history = target
         setStatus('error', `Send failed: ${(err as Error)?.message ?? err}`)
         setDoc(composeDoc())
       }
-    }
-  })
+    })
 }
 
 // ── Incoming Telegram messages (new + edits from subscribe) ──
-//
-// Reply/commit approach chosen:
-//   - awaitingReply=true after sendTurn; pendingUserText holds the sent text.
-//   - First bot message with a new id → commit { user: pendingUserText, reply: m.text }
-//     immediately so the turn appears in history + glasses render.
-//   - Subsequent edits (same id) → update the last item of `history` in-place
-//     (the bot sometimes edits its message to stream or correct it).
-//   - awaitingReply stays true until the next sendTurn to allow in-place edits.
-//   - We only act when active?.topicId matches (best-effort: we can't scope
-//     subscribe to a single topic without extending TgClient; this is fine since
-//     the glasses show one topic at a time and the user only sends to that topic).
-function onTgMessage(m: { id: number; text: string; mine: boolean; bot: boolean; date: number }): void {
-  if (!m.bot) return // only react to bot replies
+// React to every sender (humans and bots), scoped to the active group + topic.
+// Upsert by id so edits (e.g. a bot streaming/correcting) update in place. Our
+// own outgoing messages also arrive here and upsert onto the reconciled id.
+function onTgMessage(m: TgMessage): void {
   if (!active) return
-  if (!awaitingReply) return
+  if (m.chatId !== settings.tgGroupId.trim()) return
+  if (m.topicId !== active.topicId) return
+  const text = m.text.trim()
+  if (!text) return
 
-  const topicHistory = historyFor(active.topicId)
-  const replyBody = m.text.trim() || '(no reply)'
+  const log = historyFor(active.topicId)
+  appendMsg(log, { id: m.id, from: m.from, text, mine: m.mine })
+  history = log
 
-  if (replyMsgId === null || m.id !== replyMsgId) {
-    // New bot message — commit the pending turn.
-    replyMsgId = m.id
-    pushTurn(topicHistory, pendingUserText, replyBody)
-    // Keep history reference current if we're still on this topic.
-    if (active) history = historyFor(active.topicId)
-  } else {
-    // Edit of the same message — update the last turn in place.
-    const last = topicHistory[topicHistory.length - 1]
-    if (last) last.reply = replyBody
-  }
-
-  // Update live display.
-  replyText = replyBody
-  setReply(replyBody)
-  if (view === 'convo' && active) {
-    // Show the settled reply — clear the "working" active block.
-    transcriptText = ''
+  if (view === 'convo') {
     mode = 'idle'
     setStatus('idle', `Ready · ${active.title}`)
     setDoc(composeDoc())
@@ -522,9 +485,6 @@ async function switchToTopic(t: Topic): Promise<void> {
   mode = 'idle'
   transcriptText = ''
   replyText = ''
-  awaitingReply = false
-  pendingUserText = ''
-  replyMsgId = null
   followTail = true
   lineOffset = 0
   view = 'convo'
@@ -537,7 +497,7 @@ async function switchToTopic(t: Topic): Promise<void> {
       const msgs = await tg!.getTopicHistory(settings.tgGroupId, t.id, 20)
       // Guard: user may have switched away while loading.
       if (active?.topicId === t.id && history.length === 0) {
-        history.push(...messagesToTurns(msgs))
+        history.push(...messagesToLog(msgs))
       }
     } catch (err) {
       console.error('getTopicHistory failed:', err)
