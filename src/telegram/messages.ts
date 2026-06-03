@@ -24,6 +24,16 @@ export interface TgMessage {
   date: number
 }
 
+// Forum thread id for a message. Telegram puts the topic root in replyToTopId
+// for replies inside a topic, in replyToMsgId for the topic's top-level posts,
+// and omits the header entirely for the General topic (id 1).
+export function topicIdOf(replyTo?: {
+  replyToTopId?: number
+  replyToMsgId?: number
+}): number {
+  return replyTo?.replyToTopId ?? replyTo?.replyToMsgId ?? 1
+}
+
 // Fold a chronological message list into chat Turns. A "you" message starts a
 // turn; the following bot message(s) become its reply. Non-bot others are shown
 // as their own user line. Service messages (empty text) are dropped.
