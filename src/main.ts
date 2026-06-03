@@ -425,7 +425,6 @@ function toggle(): void {
   } else if (mode === 'listening') {
     void stopListening()
   }
-  // While 'thinking', a single tap is ignored — let the reply arrive.
 }
 
 // ── Topic picker (a list container swapped in over the conversation) ──
