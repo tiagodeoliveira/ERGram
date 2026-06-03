@@ -1,5 +1,20 @@
 import type { Turn } from '../conversation'
 
+// Resolve a display label for a message sender: first name → @username →
+// generic ('Bot' for bots, 'Someone' otherwise). Accepts a minimal shape so it
+// stays pure and testable independent of GramJS entity types.
+export function senderLabel(s: {
+  firstName?: string
+  username?: string
+  bot?: boolean
+}): string {
+  const first = s.firstName?.trim()
+  if (first) return first
+  const user = s.username?.trim()
+  if (user) return '@' + user
+  return s.bot ? 'Bot' : 'Someone'
+}
+
 // A normalized Telegram message for rendering.
 export interface TgMessage {
   id: number
