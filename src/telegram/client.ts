@@ -3,7 +3,7 @@ import { TelegramClient, Api } from 'telegram'
 import { StringSession } from 'telegram/sessions'
 import { NewMessage, NewMessageEvent } from 'telegram/events'
 import { EditedMessage, EditedMessageEvent } from 'telegram/events/EditedMessage'
-import type { TgMessage } from './messages'
+import { senderLabel, topicIdOf, type TgMessage } from './messages'
 import { normalizeForumTopics, type Topic } from './topics'
 
 export interface TgCredentials {
@@ -74,11 +74,12 @@ export class TgClient {
     return normalizeForumTopics(res)
   }
 
-  /** Send text into a forum topic (or the chat if threadId is undefined). */
-  async sendToTopic(chatId: string, threadId: number | undefined, text: string): Promise<void> {
+  /** Send text into a forum topic (or the chat if threadId is undefined). Returns the sent message id. */
+  async sendToTopic(chatId: string, threadId: number | undefined, text: string): Promise<number> {
     const opts: Record<string, unknown> = { message: text }
     if (threadId) opts.replyTo = threadId
-    await this.client.sendMessage(chatId, opts)
+    const sent = await this.client.sendMessage(chatId, opts)
+    return (sent as unknown as { id: number }).id
   }
 
   /** Newest-last list of normalized messages for a topic. */
@@ -90,16 +91,16 @@ export class TgClient {
     const opts: Record<string, unknown> = { limit }
     if (threadId) opts.replyTo = threadId
     const raw = await this.client.getMessages(chatId, opts)
-    return [...raw].reverse().map((m) => this.normalize(m))
+    return Promise.all([...raw].reverse().map((m) => this.normalize(m)))
   }
 
   /** Subscribe to new + edited messages. Returns an unsubscribe fn. */
   subscribe(onMessage: (m: TgMessage) => void): () => void {
-    const newHandler = (event: NewMessageEvent): void => {
-      onMessage(this.normalize(event.message))
+    const newHandler = async (event: NewMessageEvent): Promise<void> => {
+      onMessage(await this.normalize(event.message))
     }
-    const editedHandler = (event: EditedMessageEvent): void => {
-      onMessage(this.normalize(event.message))
+    const editedHandler = async (event: EditedMessageEvent): Promise<void> => {
+      onMessage(await this.normalize(event.message))
     }
 
     const newBuilder = new NewMessage({})
@@ -114,19 +115,37 @@ export class TgClient {
     }
   }
 
-  private normalize(m: unknown): TgMessage {
+  private async normalize(m: unknown): Promise<TgMessage> {
     const x = m as {
       id: number
       message?: string
       out?: boolean
       date?: number
-      sender?: { bot?: boolean }
+      chatId?: { toString(): string }
+      sender?: { firstName?: string; username?: string; bot?: boolean }
+      getSender?: () => Promise<{ firstName?: string; username?: string; bot?: boolean } | undefined>
+      replyTo?: { replyToTopId?: number; replyToMsgId?: number }
     }
+
+    // Prefer the inlined sender; fetch it only when the update didn't carry one.
+    let sender = x.sender
+    if (!sender && typeof x.getSender === 'function') {
+      try {
+        sender = await x.getSender()
+      } catch {
+        sender = undefined
+      }
+    }
+
+    const mine = Boolean(x.out)
     return {
       id: x.id,
       text: x.message || '',
-      mine: Boolean(x.out),
-      bot: Boolean(x.sender?.bot),
+      mine,
+      bot: Boolean(sender?.bot),
+      from: mine ? '' : senderLabel(sender ?? {}),
+      chatId: x.chatId?.toString() ?? '',
+      topicId: topicIdOf(x.replyTo),
       date: x.date || 0,
     }
   }
