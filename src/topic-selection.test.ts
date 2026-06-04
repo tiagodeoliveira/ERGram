@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { activeTopicFromForumTopic, MAIN_CHAT_TOPIC, shouldShowTopicPicker } from './topic-selection'
+import {
+  activeTopicFromForumTopic,
+  MAIN_CHAT_TOPIC,
+  shouldShowTopicPicker,
+} from './topic-selection'
 
 const topic = (id: number, title: string) => ({ id, title })
 

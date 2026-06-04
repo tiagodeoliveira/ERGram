@@ -5,18 +5,18 @@
 
 ## Problem
 
-On the glasses we only attribute *your* speech (`You: …`). Incoming messages from
+On the glasses we only attribute _your_ speech (`You: …`). Incoming messages from
 the topic are rendered with no speaker label, and the data model can't represent
 them correctly:
 
 - `renderTurn()` (`main.ts`) shows the reply below a divider with **no name**.
 - `onTgMessage()` (`main.ts`) early-returns on `if (!m.bot)` — a **human** replying
   in the topic never appears on the live path; they only surface via history.
-- `messagesToTurns()` (`messages.ts`) folds *any* non-bot message into the `user`
+- `messagesToTurns()` (`messages.ts`) folds _any_ non-bot message into the `user`
   slot, so another person's message renders as **`You:`** — wrong attribution.
 - `normalize()` (`client.ts`) captures only `bot: boolean` — never the sender name.
 
-The group is **mixed** (bots *and* multiple humans), so every incoming message needs
+The group is **mixed** (bots _and_ multiple humans), so every incoming message needs
 correct, per-sender attribution, live.
 
 ## Goals
@@ -40,8 +40,8 @@ per-message entry in `src/conversation.ts`:
 
 ```ts
 export interface Msg {
-  id: number    // Telegram message id; local placeholders use negative ids
-  from: string  // sender display label ('' when mine — renderer shows 'You')
+  id: number // Telegram message id; local placeholders use negative ids
+  from: string // sender display label ('' when mine — renderer shows 'You')
   text: string
   mine: boolean // sent by the logged-in account
 }
@@ -155,15 +155,15 @@ over `from.length + text.length`.
 
 ## Components touched
 
-| File | Change |
-|---|---|
-| `src/conversation.ts` | `Turn` → `Msg` |
-| `src/telegram/messages.ts` | `TgMessage` gains `from`/`chatId`/`topicId`; add `senderLabel`, `topicIdOf`; `messagesToTurns` → `messagesToLog` |
-| `src/telegram/client.ts` | `normalize` resolves sender + routing (async, `getSender` fallback); `sendToTopic` returns id |
-| `src/main.ts` | `histories` of `Msg[]`; new live path (filter+upsert); optimistic echo+reconcile; new renderer (grouping + speaker-change rule); delete reply-pairing machine and `thinking` mode |
-| `package.json` | add Vitest dev dep + `test` script |
-| `vitest.config.ts` (new) | minimal config |
-| `src/**/*.test.ts` (new) | tests (below) |
+| File                       | Change                                                                                                                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/conversation.ts`      | `Turn` → `Msg`                                                                                                                                                                    |
+| `src/telegram/messages.ts` | `TgMessage` gains `from`/`chatId`/`topicId`; add `senderLabel`, `topicIdOf`; `messagesToTurns` → `messagesToLog`                                                                  |
+| `src/telegram/client.ts`   | `normalize` resolves sender + routing (async, `getSender` fallback); `sendToTopic` returns id                                                                                     |
+| `src/main.ts`              | `histories` of `Msg[]`; new live path (filter+upsert); optimistic echo+reconcile; new renderer (grouping + speaker-change rule); delete reply-pairing machine and `thinking` mode |
+| `package.json`             | add Vitest dev dep + `test` script                                                                                                                                                |
+| `vitest.config.ts` (new)   | minimal config                                                                                                                                                                    |
+| `src/**/*.test.ts` (new)   | tests (below)                                                                                                                                                                     |
 
 ## Testing (Vitest)
 

@@ -7,7 +7,7 @@ ER = Even Realities · Gram = Telegram.
 Push-to-talk voice on the glasses → [Soniox](https://soniox.com) real-time speech-to-text → your
 message is posted **into a Telegram topic as you** (via a GramJS MTProto userbot running in the PWA).
 Whatever responds in that topic — a bot/agent or another member — is read back onto the glasses. The
-PWA *is* the whole app: it runs inside the Even Realities companion app, captures the glasses mic via
+PWA _is_ the whole app: it runs inside the Even Realities companion app, captures the glasses mic via
 the Even Hub SDK, and talks directly to Soniox and Telegram. No separate server.
 
 ```
@@ -40,10 +40,10 @@ A **step-by-step Telegram onboarding wizard**:
 
 Plus two fields:
 
-| Field | Example | Used as |
-|---|---|---|
-| Group ID | `-1001234567890` | the supergroup whose topics the glasses list (copy from the Telegram UI) |
-| Soniox API key | `sox_…` | Soniox real-time STT auth |
+| Field          | Example          | Used as                                                                  |
+| -------------- | ---------------- | ------------------------------------------------------------------------ |
+| Group ID       | `-1001234567890` | the supergroup whose topics the glasses list (copy from the Telegram UI) |
+| Soniox API key | `sox_…`          | Soniox real-time STT auth                                                |
 
 The Telegram **session string** (minted by the login, full account access) and the other values are
 saved via the SDK's `setLocalStorage` (the only reliable persistence in the Even App WebView). Until
@@ -68,8 +68,9 @@ Vite, then connects to `http://localhost:5173`). To capture from a specific host
 
 GramJS needs Node globals in the browser: `vite-plugin-node-polyfills` provides process/global, and
 `src/buffer-global.ts` supplies a single `Buffer` from the `buffer` package (`resolve.dedupe: ['buffer']`
-+ `pnpm.overrides.buffer`) — without this, GramJS's `instanceof Buffer` cross-fails at 2FA. The client
-uses `useWSS: true`.
+
+- `pnpm.overrides.buffer`) — without this, GramJS's `instanceof Buffer` cross-fails at 2FA. The client
+  uses `useWSS: true`.
 
 ## Build / package
 

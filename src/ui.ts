@@ -2,8 +2,7 @@
 //
 // This is NOT what renders on the glasses — the glasses get a TextContainer
 // driven from main.ts. This panel is where you connect Telegram (step-by-step
-// wizard), configure the target group, enter the Soniox key, and watch the
-// live transcript / reply.
+// wizard), configure the target group, and enter the Soniox key.
 
 import type { LoginPrompts, TgCredentials } from './telegram/client'
 import type { Settings } from './settings'
@@ -22,9 +21,6 @@ interface UiHandlers {
 
 // ── Module-level DOM refs ─────────────────────────────────────────────────────
 let statusEl: HTMLDivElement
-let finalEl: HTMLSpanElement
-let interimEl: HTMLSpanElement
-let replyEl: HTMLDivElement
 let savedEl: HTMLSpanElement
 
 // Settings form inputs
@@ -201,27 +197,12 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
         </div>
       </details>
 
-      <section class="block">
-        <div class="block-label">Transcript</div>
-        <div class="transcript" aria-live="polite">
-          <span id="final"></span><span id="interim" class="interim"></span>
-        </div>
-      </section>
-
-      <section class="block">
-        <div class="block-label">Reply</div>
-        <div id="reply" class="reply" aria-live="polite"></div>
-      </section>
-
       <footer>Tap temple to talk · tap to send · double-tap to cancel.</footer>
     </main>
   `
 
   // ── Wire up DOM refs ──────────────────────────────────────────────────────
   statusEl = app.querySelector<HTMLDivElement>('#status')!
-  finalEl = app.querySelector<HTMLSpanElement>('#final')!
-  interimEl = app.querySelector<HTMLSpanElement>('#interim')!
-  replyEl = app.querySelector<HTMLDivElement>('#reply')!
   savedEl = app.querySelector<HTMLSpanElement>('#saved')!
 
   sonioxInput = app.querySelector<HTMLInputElement>('#soniox')!
@@ -304,16 +285,19 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
     }
 
     setTgStatus('', 'Sending code…')
-    handlers.onTgLogin(creds, prompts).then((username) => {
-      // currentSession is updated by the controller via handle.updateSession()
-      // before or after this .then() runs; the Save button closure always reads
-      // the current module-level value, so order doesn't matter.
-      connectedNameEl.textContent = `✅ Connected as @${username}`
-      showStep('connected')
-      flashSaved('Connected')
-    }).catch((err: unknown) => {
-      setTgStatus('error', String(err))
-    })
+    handlers
+      .onTgLogin(creds, prompts)
+      .then((username) => {
+        // currentSession is updated by the controller via handle.updateSession()
+        // before or after this .then() runs; the Save button closure always reads
+        // the current module-level value, so order doesn't matter.
+        connectedNameEl.textContent = `✅ Connected as @${username}`
+        showStep('connected')
+        flashSaved('Connected')
+      })
+      .catch((err: unknown) => {
+        setTgStatus('error', String(err))
+      })
   })
 
   // Step 'code' — resolve the pending phoneCode promise
@@ -382,17 +366,6 @@ export function setStatus(kind: Status, text: string): void {
   statusEl.textContent = text
 }
 
-export function setTranscript(finalText: string, interimText: string): void {
-  if (!finalEl) return
-  finalEl.textContent = finalText
-  interimEl.textContent = interimText
-}
-
-export function setReply(text: string): void {
-  if (!replyEl) return
-  replyEl.textContent = text
-}
-
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 function injectStyles(): void {
@@ -450,17 +423,9 @@ function injectStyles(): void {
     button.ghost:active { background: #f2f2f7; }
     .saved { font-size: 13px; color: #2ea043; font-weight: 600; }
 
-    .block { display: flex; flex-direction: column; gap: 8px; }
-    .block-label { font-size: 12px; color: #6e6e73; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.04em; padding-left: 4px; }
-    .transcript, .reply { background: #ffffff; border: 1px solid #e5e5ea; color: #1c1c1e;
-      border-radius: 12px; padding: 16px; font-size: 17px; line-height: 1.5; min-height: 88px;
-      white-space: pre-wrap; word-break: break-word; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
-    .interim { color: #8e8e93; }
     footer { font-size: 12px; color: #8e8e93; text-align: center; padding: 4px 8px; }
   `
   const style = document.createElement('style')
   style.textContent = css
   document.head.appendChild(style)
 }
-

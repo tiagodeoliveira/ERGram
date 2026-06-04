@@ -4,5 +4,4 @@
 // checks cross-fail (the 2FA "Bytes or str expected, not Buffer" error).
 // Must be imported BEFORE any GramJS module so the global is set at init time.
 import { Buffer } from 'buffer'
-
 ;(globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer

@@ -16,7 +16,10 @@ export default defineConfig({
   // expected" error). We set the global Buffer ourselves from the real `buffer`
   // package (see src/buffer-global.ts) and dedupe so there's exactly one class.
   plugins: [
-    nodePolyfills({ globals: { Buffer: false, global: true, process: true }, overrides: { vm: vmStub } }),
+    nodePolyfills({
+      globals: { Buffer: false, global: true, process: true },
+      overrides: { vm: vmStub },
+    }),
   ],
   resolve: { dedupe: ['buffer'] },
   server: { host: true, port: 5173 },

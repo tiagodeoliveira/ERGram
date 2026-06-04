@@ -17,7 +17,7 @@ import {
   hasTelegram,
   canChat,
 } from './settings'
-import { mountUi, setStatus, setTranscript, flashSaved } from './ui'
+import { mountUi, setStatus, flashSaved } from './ui'
 import { wrapToLines } from './glasses/wrap'
 import { getTextWidth } from '@evenrealities/pretext'
 import { TgClient } from './telegram/client'
@@ -103,7 +103,11 @@ const HISTORY_CHAR_BUDGET = 24000
 // ── Startup: try to resume Telegram session ──
 if (hasTelegram(settings)) {
   try {
-    tg = new TgClient({ apiId: Number(settings.tgApiId), apiHash: settings.tgApiHash, session: settings.tgSession })
+    tg = new TgClient({
+      apiId: Number(settings.tgApiId),
+      apiHash: settings.tgApiHash,
+      session: settings.tgSession,
+    })
     const ok = await tg.resume()
     if (ok) {
       tg.subscribe(onTgMessage)
@@ -134,7 +138,12 @@ const uiHandle = mountUi(settings, {
     // id is also set), so there's no "reopen the app" step after onboarding.
     if (view === 'convo' && mode === 'idle' && !transcriptText) reflectIdle()
     const me = await tg.client.getMe()
-    return '@' + (((me as unknown as { username?: string; firstName?: string }).username) ?? ((me as unknown as { firstName?: string }).firstName) ?? 'you')
+    return (
+      '@' +
+      ((me as unknown as { username?: string; firstName?: string }).username ??
+        (me as unknown as { firstName?: string }).firstName ??
+        'you')
+    )
   },
   onTgLogout: async () => {
     await tg?.disconnect()
@@ -307,13 +316,11 @@ function startListening(): void {
   transcriptText = ''
   followTail = true
   lineOffset = 0
-  setTranscript('', '')
   try {
     stt = startSttStream(
       settings.sonioxKey,
       (snap) => {
         transcriptText = (snap.finalText + snap.interimText).trim()
-        setTranscript(snap.finalText, snap.interimText)
         if (mode === 'listening') setDoc(listeningBody(), LISTENING_HEADER)
       },
       (err) => {
@@ -346,7 +353,6 @@ async function stopListening(): Promise<void> {
   stt = null
 
   const text = transcriptText.trim()
-  setTranscript(text, '')
 
   if (!text) {
     reflectIdle()
@@ -447,7 +453,10 @@ async function enterPicker(): Promise<void> {
 
   // Show a placeholder list while we fetch.
   await bridge.rebuildPageContainer(
-    new RebuildPageContainer({ containerTotalNum: 1, listObject: [pickerContainer(['Loading topics…'])] }),
+    new RebuildPageContainer({
+      containerTotalNum: 1,
+      listObject: [pickerContainer(['Loading topics…'])],
+    }),
   )
 
   try {
@@ -556,7 +565,8 @@ const unsubscribe = bridge.onEvenHubEvent((event) => {
       // Picker is home — double-tap there does nothing (and absorbs the stray
       // second DOUBLE_CLICK the firmware emits for one physical double-tap).
       if (view === 'picker') return
-      if (mode === 'listening') void cancelListening() // dictating → cancel the message
+      if (mode === 'listening')
+        void cancelListening() // dictating → cancel the message
       else if (tg && groupId()) void enterPicker() // chat → back to list
       return
     case OsEventTypeList.SYSTEM_EXIT_EVENT:

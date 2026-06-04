@@ -16,28 +16,30 @@
 
 ## File structure
 
-| File | Responsibility |
-|---|---|
-| `src/conversation.ts` (modify) | `Msg` type + pure log ops: `upsertMsg`, `removeById`, `reconcileSend` |
-| `src/telegram/messages.ts` (modify) | `TgMessage` (+`from`/`chatId`/`topicId`); pure helpers `senderLabel`, `topicIdOf`, `messagesToLog` |
-| `src/glasses/render.ts` (create) | Pure `renderConversation(msgs, divider)` — grouping + speaker-change rule |
-| `src/telegram/client.ts` (modify) | `normalize` resolves sender + routing (async); `sendToTopic` returns the sent id |
-| `src/main.ts` (modify) | Flat-log state, live path (filter+upsert), optimistic echo+reconcile, new renderer; delete pairing machine + `thinking` mode |
-| `vitest.config.ts` (create) | Minimal Vitest config |
-| `package.json` (modify) | Vitest dev dep + `test` scripts |
-| `src/*.test.ts`, `src/**/*.test.ts` (create) | Unit tests for the pure modules |
+| File                                         | Responsibility                                                                                                               |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `src/conversation.ts` (modify)               | `Msg` type + pure log ops: `upsertMsg`, `removeById`, `reconcileSend`                                                        |
+| `src/telegram/messages.ts` (modify)          | `TgMessage` (+`from`/`chatId`/`topicId`); pure helpers `senderLabel`, `topicIdOf`, `messagesToLog`                           |
+| `src/glasses/render.ts` (create)             | Pure `renderConversation(msgs, divider)` — grouping + speaker-change rule                                                    |
+| `src/telegram/client.ts` (modify)            | `normalize` resolves sender + routing (async); `sendToTopic` returns the sent id                                             |
+| `src/main.ts` (modify)                       | Flat-log state, live path (filter+upsert), optimistic echo+reconcile, new renderer; delete pairing machine + `thinking` mode |
+| `vitest.config.ts` (create)                  | Minimal Vitest config                                                                                                        |
+| `package.json` (modify)                      | Vitest dev dep + `test` scripts                                                                                              |
+| `src/*.test.ts`, `src/**/*.test.ts` (create) | Unit tests for the pure modules                                                                                              |
 
 ---
 
 ## Task 1: Set up Vitest
 
 **Files:**
+
 - Modify: `package.json`
 - Create: `vitest.config.ts`
 
 - [ ] **Step 1: Add Vitest as a dev dependency**
 
 Run:
+
 ```bash
 pnpm add -D vitest@^2.1.8
 ```
@@ -83,6 +85,7 @@ git commit -m "Add Vitest harness"
 ## Task 2: `senderLabel` helper
 
 **Files:**
+
 - Modify: `src/telegram/messages.ts`
 - Test: `src/telegram/messages.test.ts`
 
@@ -126,11 +129,7 @@ Add to the top of `src/telegram/messages.ts` (below the existing imports):
 // Resolve a display label for a message sender: first name → @username →
 // generic ('Bot' for bots, 'Someone' otherwise). Accepts a minimal shape so it
 // stays pure and testable independent of GramJS entity types.
-export function senderLabel(s: {
-  firstName?: string
-  username?: string
-  bot?: boolean
-}): string {
+export function senderLabel(s: { firstName?: string; username?: string; bot?: boolean }): string {
   const first = s.firstName?.trim()
   if (first) return first
   const user = s.username?.trim()
@@ -156,6 +155,7 @@ git commit -m "Add senderLabel helper"
 ## Task 3: `topicIdOf` helper
 
 **Files:**
+
 - Modify: `src/telegram/messages.ts`
 - Test: `src/telegram/messages.test.ts`
 
@@ -195,10 +195,7 @@ Add to `src/telegram/messages.ts`:
 // Forum thread id for a message. Telegram puts the topic root in replyToTopId
 // for replies inside a topic, in replyToMsgId for the topic's top-level posts,
 // and omits the header entirely for the General topic (id 1).
-export function topicIdOf(replyTo?: {
-  replyToTopId?: number
-  replyToMsgId?: number
-}): number {
+export function topicIdOf(replyTo?: { replyToTopId?: number; replyToMsgId?: number }): number {
   return replyTo?.replyToTopId ?? replyTo?.replyToMsgId ?? 1
 }
 ```
@@ -220,6 +217,7 @@ git commit -m "Add topicIdOf helper"
 ## Task 4: `Msg` type + pure log operations
 
 **Files:**
+
 - Modify: `src/conversation.ts`
 - Test: `src/conversation.test.ts`
 
@@ -347,6 +345,7 @@ git commit -m "Replace Turn with flat Msg log + pure log ops"
 ## Task 5: `messagesToLog` + `TgMessage` fields
 
 **Files:**
+
 - Modify: `src/telegram/messages.ts`
 - Test: `src/telegram/messages.test.ts`
 
@@ -359,7 +358,15 @@ import { senderLabel, topicIdOf, messagesToLog, type TgMessage } from './message
 
 describe('messagesToLog', () => {
   const tg = (over: Partial<TgMessage>): TgMessage => ({
-    id: 0, text: '', mine: false, bot: false, from: '', chatId: '-100', topicId: 5, date: 0, ...over,
+    id: 0,
+    text: '',
+    mine: false,
+    bot: false,
+    from: '',
+    chatId: '-100',
+    topicId: 5,
+    date: 0,
+    ...over,
   })
 
   it('drops empty/whitespace (service) messages and trims text', () => {
@@ -411,11 +418,7 @@ export interface TgMessage {
 // Resolve a display label for a message sender: first name → @username →
 // generic ('Bot' for bots, 'Someone' otherwise). Accepts a minimal shape so it
 // stays pure and testable independent of GramJS entity types.
-export function senderLabel(s: {
-  firstName?: string
-  username?: string
-  bot?: boolean
-}): string {
+export function senderLabel(s: { firstName?: string; username?: string; bot?: boolean }): string {
   const first = s.firstName?.trim()
   if (first) return first
   const user = s.username?.trim()
@@ -426,10 +429,7 @@ export function senderLabel(s: {
 // Forum thread id for a message. Telegram puts the topic root in replyToTopId
 // for replies inside a topic, in replyToMsgId for the topic's top-level posts,
 // and omits the header entirely for the General topic (id 1).
-export function topicIdOf(replyTo?: {
-  replyToTopId?: number
-  replyToMsgId?: number
-}): number {
+export function topicIdOf(replyTo?: { replyToTopId?: number; replyToMsgId?: number }): number {
   return replyTo?.replyToTopId ?? replyTo?.replyToMsgId ?? 1
 }
 
@@ -465,6 +465,7 @@ git commit -m "Add messagesToLog + routing fields on TgMessage"
 ## Task 6: `renderConversation` (flat log → display string)
 
 **Files:**
+
 - Create: `src/glasses/render.ts`
 - Test: `src/glasses/render.test.ts`
 
@@ -487,13 +488,19 @@ describe('renderConversation', () => {
 
   it('labels mine as "You" and others by their from label', () => {
     expect(renderConversation([m('Alice', 'hey'), m('', "what's up", true)], D)).toBe(
-      ["Alice: hey", D, "You: what's up"].join('\n'),
+      ['Alice: hey', D, "You: what's up"].join('\n'),
     )
   })
 
   it('groups consecutive same-speaker messages under one name, no rule between', () => {
     const out = renderConversation(
-      [m('Alice', 'hey there'), m('', "what's up", true), m('Bob', 'not much'), m('Bob', 'did you see the PR?'), m('Alice', 'yeah, looks good')],
+      [
+        m('Alice', 'hey there'),
+        m('', "what's up", true),
+        m('Bob', 'not much'),
+        m('Bob', 'did you see the PR?'),
+        m('Alice', 'yeah, looks good'),
+      ],
       D,
     )
     expect(out).toBe(
@@ -566,6 +573,7 @@ git commit -m "Add renderConversation: grouped, speaker-attributed log"
 ## Task 7: Telegram client — sender + routing in `normalize`, id from `sendToTopic`
 
 **Files:**
+
 - Modify: `src/telegram/client.ts`
 
 > No standalone build gate for this task (it compiles together with `main.ts` at Task 8). Apply the exact edits below.
@@ -575,10 +583,13 @@ git commit -m "Add renderConversation: grouped, speaker-attributed log"
 In `src/telegram/client.ts`, update the messages import (it currently imports only the type):
 
 Replace:
+
 ```ts
 import type { TgMessage } from './messages'
 ```
+
 with:
+
 ```ts
 import { senderLabel, topicIdOf, type TgMessage } from './messages'
 ```
@@ -641,24 +652,26 @@ Replace the existing `private normalize(...)` method:
 - [ ] **Step 4: Await `normalize` at its three call sites**
 
 In `getTopicHistory`, replace the return:
+
 ```ts
-    const raw = await this.client.getMessages(chatId, opts)
-    return Promise.all([...raw].reverse().map((m) => this.normalize(m)))
+const raw = await this.client.getMessages(chatId, opts)
+return Promise.all([...raw].reverse().map((m) => this.normalize(m)))
 ```
 
 In `subscribe`, make both handlers async:
+
 ```ts
-    const newHandler = async (event: NewMessageEvent): Promise<void> => {
-      onMessage(await this.normalize(event.message))
-    }
-    const editedHandler = async (event: EditedMessageEvent): Promise<void> => {
-      onMessage(await this.normalize(event.message))
-    }
+const newHandler = async (event: NewMessageEvent): Promise<void> => {
+  onMessage(await this.normalize(event.message))
+}
+const editedHandler = async (event: EditedMessageEvent): Promise<void> => {
+  onMessage(await this.normalize(event.message))
+}
 ```
 
 - [ ] **Step 5: Sanity check that the file parses**
 
-Run: `pnpm exec tsc --noEmit src/telegram/client.ts 2>&1 | head -5` *(informational only — cross-file errors from `main.ts` are expected until Task 8)*.
+Run: `pnpm exec tsc --noEmit src/telegram/client.ts 2>&1 | head -5` _(informational only — cross-file errors from `main.ts` are expected until Task 8)_.
 
 - [ ] **Step 6: Commit**
 
@@ -672,6 +685,7 @@ git commit -m "Resolve sender + topic routing in normalize; return sent id"
 ## Task 8: Wire `main.ts` to the flat log (integration) — full build gate
 
 **Files:**
+
 - Modify: `src/main.ts`
 
 This task makes the whole app compile and run on the new model. Apply each edit, then verify with `pnpm build` + `pnpm test`.
@@ -681,21 +695,27 @@ This task makes the whole app compile and run on the new model. Apply each edit,
 Replace the conversation/messages/ui-related imports near the top of `src/main.ts`.
 
 Replace:
+
 ```ts
 import { mountUi, setStatus, setTranscript, setReply, flashSaved } from './ui'
 ```
+
 with:
+
 ```ts
 import { mountUi, setStatus, setTranscript, flashSaved } from './ui'
 ```
 
 Replace:
+
 ```ts
 import { messagesToTurns } from './telegram/messages'
 import type { Topic } from './telegram/topics'
 import type { Turn } from './conversation'
 ```
+
 with:
+
 ```ts
 import { messagesToLog } from './telegram/messages'
 import type { Topic } from './telegram/topics'
@@ -706,11 +726,13 @@ import { renderConversation } from './glasses/render'
 - [ ] **Step 2: Remove the heavy turn divider and `thinking` mode**
 
 Delete the `TURN_DIVIDER` constant line:
+
 ```ts
 const TURN_DIVIDER = makeRule('━')
 ```
 
 Change the `Mode` type:
+
 ```ts
 type Mode = 'idle' | 'listening'
 ```
@@ -718,6 +740,7 @@ type Mode = 'idle' | 'listening'
 - [ ] **Step 3: Switch topic state to `Msg[]` and add a local id generator**
 
 Replace:
+
 ```ts
 const histories = new Map<number, Turn[]>()
 function historyFor(id: number): Turn[] {
@@ -732,7 +755,9 @@ function historyFor(id: number): Turn[] {
 let active: { topicId: number; title: string } | null = null
 let history: Turn[] = []
 ```
+
 with:
+
 ```ts
 const histories = new Map<number, Msg[]>()
 function historyFor(id: number): Msg[] {
@@ -758,6 +783,7 @@ function nextLocalId(): number {
 - [ ] **Step 4: Delete the reply-pairing state block**
 
 Delete this entire block (the "Awaiting-reply tracking" section):
+
 ```ts
 // ── Awaiting-reply tracking ──
 // Simple approach: set awaitingReply=true when we send a message. When a bot
@@ -771,6 +797,7 @@ let replyMsgId: number | null = null
 - [ ] **Step 5: Replace the turn-rendering helpers with the flat-log renderer**
 
 Replace this block:
+
 ```ts
 // ── Turn rendering ──
 function renderTurn(t: Turn): string {
@@ -804,7 +831,9 @@ function pushTurn(arr: Turn[], user: string, reply: string): void {
   }
 }
 ```
+
 with:
+
 ```ts
 // ── Flat-log rendering ──
 function listeningBody(): string {
@@ -829,6 +858,7 @@ function appendMsg(log: Msg[], msg: Msg): void {
 In `stopListening`, replace the `else` branch of the `if (canChat(settings) && active)`:
 
 Replace:
+
 ```ts
   } else {
     pushTurn(history, text, '')
@@ -839,7 +869,9 @@ Replace:
     replyText = ''
   }
 ```
+
 with:
+
 ```ts
   } else {
     appendMsg(history, { id: nextLocalId(), from: '', text, mine: true })
@@ -854,6 +886,7 @@ with:
 - [ ] **Step 7: Replace `sendTurn` with the optimistic-echo flow**
 
 Replace the entire `sendTurn` function:
+
 ```ts
 function sendTurn(userText: string): void {
   if (!tg || !active) {
@@ -900,6 +933,7 @@ function sendTurn(userText: string): void {
 - [ ] **Step 8: Replace `onTgMessage` with the all-senders, topic-scoped handler**
 
 Replace the entire `onTgMessage` function and its leading comment block:
+
 ```ts
 // ── Incoming Telegram messages (new + edits from subscribe) ──
 // React to every sender (humans and bots), scoped to the active group + topic.
@@ -929,34 +963,40 @@ function onTgMessage(m: TgMessage): void {
 In `switchToTopic`, remove the now-deleted reply-tracking resets and use `messagesToLog`.
 
 Replace:
+
 ```ts
-  mode = 'idle'
-  transcriptText = ''
-  replyText = ''
-  awaitingReply = false
-  pendingUserText = ''
-  replyMsgId = null
-  followTail = true
-  lineOffset = 0
-  view = 'convo'
+mode = 'idle'
+transcriptText = ''
+replyText = ''
+awaitingReply = false
+pendingUserText = ''
+replyMsgId = null
+followTail = true
+lineOffset = 0
+view = 'convo'
 ```
+
 with:
+
 ```ts
-  mode = 'idle'
-  transcriptText = ''
-  replyText = ''
-  followTail = true
-  lineOffset = 0
-  view = 'convo'
+mode = 'idle'
+transcriptText = ''
+replyText = ''
+followTail = true
+lineOffset = 0
+view = 'convo'
 ```
 
 And replace:
+
 ```ts
-        history.push(...messagesToTurns(msgs))
+history.push(...messagesToTurns(msgs))
 ```
+
 with:
+
 ```ts
-        history.push(...messagesToLog(msgs))
+history.push(...messagesToLog(msgs))
 ```
 
 - [ ] **Step 10: Scan for leftover `thinking` / `replyText` references**
@@ -998,6 +1038,7 @@ Expected: tests PASS, build succeeds.
 - [ ] **Step 2: Live/simulator smoke test (the routing risk)**
 
 Start the simulator: `pnpm run sim` (configure Soniox + Telegram + a group with a forum topic via the companion WebView). Verify on the glasses view:
+
 - A message from another **human** in the active topic appears live, labeled with their first name (or `@username` / `Someone`).
 - A **bot** reply appears labeled (`Bot` or its name); a bot **edit** updates the same line in place (no duplicate).
 - Your own push-to-talk message appears immediately as `You: …` and does **not** duplicate when its echo arrives.

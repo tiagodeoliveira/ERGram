@@ -23,7 +23,9 @@ export class TgClient {
   readonly client: TelegramClient
   private _meId: bigint | null = null
   /** The logged-in account's user id, available after login/resume. */
-  get meId(): bigint | null { return this._meId }
+  get meId(): bigint | null {
+    return this._meId
+  }
 
   constructor(cfg: TgCredentials) {
     this.client = new TelegramClient(new StringSession(cfg.session), cfg.apiId, cfg.apiHash, {
@@ -125,7 +127,9 @@ export class TgClient {
       date?: number
       chatId?: { toString(): string }
       sender?: { firstName?: string; username?: string; bot?: boolean }
-      getSender?: () => Promise<{ firstName?: string; username?: string; bot?: boolean } | undefined>
+      getSender?: () => Promise<
+        { firstName?: string; username?: string; bot?: boolean } | undefined
+      >
       replyTo?: { replyToTopId?: number; replyToMsgId?: number }
     }
 
