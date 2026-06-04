@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Husky 9 invokes this via `sh -e`, which ignores the shebang and breaks
+# `set -o pipefail` (POSIX sh / dash doesn't support it). Re-exec under bash
+# so the body gets the shell it was written for.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
+set -euo pipefail
+
+# 1. Lint + format staged JS/TS/JSON/MD/YAML (auto-fix + re-stage).
+pnpm exec lint-staged
+
+# 2. Whole-project typecheck. lint-staged only sees staged files, but a change
+#    in one file can break types in another — tsc --noEmit catches that before
+#    it lands. Matches the build gate (pnpm build runs the same tsc first).
+pnpm exec tsc --noEmit

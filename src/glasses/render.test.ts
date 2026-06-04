@@ -12,13 +12,19 @@ describe('renderConversation', () => {
 
   it('labels mine as "You" and others by their from label', () => {
     expect(renderConversation([m('Alice', 'hey'), m('', "what's up", true)], D)).toBe(
-      ["Alice: hey", D, "You: what's up"].join('\n'),
+      ['Alice: hey', D, "You: what's up"].join('\n'),
     )
   })
 
   it('groups consecutive same-speaker messages under one name, no rule between', () => {
     const out = renderConversation(
-      [m('Alice', 'hey there'), m('', "what's up", true), m('Bob', 'not much'), m('Bob', 'did you see the PR?'), m('Alice', 'yeah, looks good')],
+      [
+        m('Alice', 'hey there'),
+        m('', "what's up", true),
+        m('Bob', 'not much'),
+        m('Bob', 'did you see the PR?'),
+        m('Alice', 'yeah, looks good'),
+      ],
       D,
     )
     expect(out).toBe(

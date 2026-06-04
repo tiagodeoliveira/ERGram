@@ -15,11 +15,7 @@ export interface TgMessage {
 // Resolve a display label for a message sender: first name → @username →
 // generic ('Bot' for bots, 'Someone' otherwise). Accepts a minimal shape so it
 // stays pure and testable independent of GramJS entity types.
-export function senderLabel(s: {
-  firstName?: string
-  username?: string
-  bot?: boolean
-}): string {
+export function senderLabel(s: { firstName?: string; username?: string; bot?: boolean }): string {
   const first = s.firstName?.trim()
   if (first) return first
   const user = s.username?.trim()
@@ -30,10 +26,7 @@ export function senderLabel(s: {
 // Forum thread id for a message. Telegram puts the topic root in replyToTopId
 // for replies inside a topic, in replyToMsgId for the topic's top-level posts,
 // and omits the header entirely for the General topic (id 1).
-export function topicIdOf(replyTo?: {
-  replyToTopId?: number
-  replyToMsgId?: number
-}): number {
+export function topicIdOf(replyTo?: { replyToTopId?: number; replyToMsgId?: number }): number {
   return replyTo?.replyToTopId ?? replyTo?.replyToMsgId ?? 1
 }
 

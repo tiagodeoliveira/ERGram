@@ -62,7 +62,12 @@ describe('seedHistory', () => {
 
   it('fills gaps in an existing topic log without reordering messages', () => {
     const log: Msg[] = [msg(100, 'existing early', 'A'), msg(104, 'existing final', 'Bot')]
-    seedHistory(log, [msg(100, 'dup early', 'A'), msg(101, 'missed progress', 'Bot'), msg(103, 'missed final', 'Bot'), msg(104, 'dup final', 'Bot')])
+    seedHistory(log, [
+      msg(100, 'dup early', 'A'),
+      msg(101, 'missed progress', 'Bot'),
+      msg(103, 'missed final', 'Bot'),
+      msg(104, 'dup final', 'Bot'),
+    ])
     expect(log).toEqual([
       msg(100, 'existing early', 'A'),
       msg(101, 'missed progress', 'Bot'),

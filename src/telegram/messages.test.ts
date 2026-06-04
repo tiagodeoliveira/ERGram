@@ -34,7 +34,15 @@ describe('topicIdOf', () => {
 
 describe('messagesToLog', () => {
   const tg = (over: Partial<TgMessage>): TgMessage => ({
-    id: 0, text: '', mine: false, bot: false, from: '', chatId: '-100', topicId: 5, date: 0, ...over,
+    id: 0,
+    text: '',
+    mine: false,
+    bot: false,
+    from: '',
+    chatId: '-100',
+    topicId: 5,
+    date: 0,
+    ...over,
   })
 
   it('drops empty/whitespace (service) messages and trims text', () => {

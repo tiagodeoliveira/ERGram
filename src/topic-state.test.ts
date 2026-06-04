@@ -15,13 +15,23 @@ const tg = (over: Partial<TgMessage>): TgMessage => ({
   ...over,
 })
 
-const msg = (id: number, text: string, from = 'Hermes', mine = false): Msg => ({ id, text, from, mine })
+const msg = (id: number, text: string, from = 'Hermes', mine = false): Msg => ({
+  id,
+  text,
+  from,
+  mine,
+})
 
 describe('applyIncomingMessage', () => {
   it('stores messages for inactive topics so final replies are waiting when the user switches back', () => {
     const histories = new Map<number, Msg[]>([[10, [msg(1, 'earlier')]]])
 
-    const changedActive = applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ id: 2, topicId: 20, text: 'final answer' }))
+    const changedActive = applyIncomingMessage(
+      histories,
+      { topicId: 10 },
+      '-100123',
+      tg({ id: 2, topicId: 20, text: 'final answer' }),
+    )
 
     expect(changedActive).toBe(false)
     expect(histories.get(20)).toEqual([msg(2, 'final answer')])
@@ -31,15 +41,23 @@ describe('applyIncomingMessage', () => {
   it('returns true only when the visible active topic changed', () => {
     const histories = new Map<number, Msg[]>()
 
-    expect(applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ id: 1, topicId: 10 }))).toBe(true)
-    expect(applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ id: 2, topicId: 11 }))).toBe(false)
+    expect(
+      applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ id: 1, topicId: 10 })),
+    ).toBe(true)
+    expect(
+      applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ id: 2, topicId: 11 })),
+    ).toBe(false)
   })
 
   it('ignores messages from other groups and empty service messages', () => {
     const histories = new Map<number, Msg[]>()
 
-    expect(applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ chatId: '-100999' }))).toBe(false)
-    expect(applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ text: '   ' }))).toBe(false)
+    expect(
+      applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ chatId: '-100999' })),
+    ).toBe(false)
+    expect(applyIncomingMessage(histories, { topicId: 10 }, '-100123', tg({ text: '   ' }))).toBe(
+      false,
+    )
 
     expect(histories.size).toBe(0)
   })
