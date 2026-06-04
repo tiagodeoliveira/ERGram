@@ -561,7 +561,12 @@ const unsubscribe = bridge.onEvenHubEvent((event) => {
       return
     case OsEventTypeList.SYSTEM_EXIT_EVENT:
     case OsEventTypeList.ABNORMAL_EXIT_EVENT:
+      // The host drives exit (long-press → "Leave app?"); confirming it lands
+      // here. Release hardware/listeners, then tell the host to tear down the
+      // page container we created at startup. exitMode 0 = exit immediately —
+      // the user already confirmed via the host dialog, so don't pop a second.
       cleanup()
+      void bridge.shutDownPageContainer(0)
       return
     case OsEventTypeList.FOREGROUND_EXIT_EVENT:
       if (mode === 'listening') void stopListening()
