@@ -26,6 +26,12 @@ import type { Topic } from './telegram/topics'
 import { upsertMsg, reconcileSend, seedHistory, type Msg } from './conversation'
 import { renderConversation } from './glasses/render'
 import { applyIncomingMessage, shouldRefreshHistoryOnTopicSwitch } from './topic-state'
+import {
+  activeTopicFromForumTopic,
+  MAIN_CHAT_TOPIC,
+  shouldShowTopicPicker,
+  type ActiveTopic,
+} from './topic-selection'
 
 // ── Geometry & rules ──
 // Container is 576x288 with paddingLength 4 → 568px text width, 10 lines @ 27px.
@@ -73,7 +79,7 @@ function historyFor(id: number): Msg[] {
   return h
 }
 
-let active: { topicId: number; title: string } | null = null
+let active: ActiveTopic | null = null
 let history: Msg[] = []
 
 // Optimistic placeholders use decreasing negative ids so they never collide
@@ -363,6 +369,7 @@ function sendTurn(userText: string): void {
     return
   }
   const topicId = active.topicId
+  const threadId = active.threadId
   const target = historyFor(topicId)
 
   // Optimistic local echo for instant feedback; reconcile against the real id.
@@ -378,7 +385,7 @@ function sendTurn(userText: string): void {
     setDoc(composeDoc())
   }
 
-  tg.sendToTopic(groupId(), topicId, userText)
+  tg.sendToTopic(groupId(), threadId, userText)
     .then((realId: number) => {
       reconcileSend(target, tempId, realId)
       if (active?.topicId === topicId) {
@@ -450,10 +457,15 @@ async function enterPicker(): Promise<void> {
     topicList = []
   }
 
+  if (!shouldShowTopicPicker(topicList)) {
+    pickerBusy = false
+    await switchToTopic(MAIN_CHAT_TOPIC)
+    return
+  }
+
   const labels = topicList.map((t) =>
     active && t.id === active.topicId ? `* ${t.title}` : `  ${t.title}`,
   )
-  if (labels.length === 0) labels.push('(no topics found)')
 
   if (view === 'picker') {
     // Still in picker view — refresh the list.
@@ -466,18 +478,18 @@ async function enterPicker(): Promise<void> {
 
 function selectPicker(index: number): void {
   const t = topicList[index]
-  if (t) void switchToTopic(t)
+  if (t) void switchToTopic(activeTopicFromForumTopic(t))
 }
 
 let switchingTopic = false
 
-async function switchToTopic(t: Topic): Promise<void> {
+async function switchToTopic(t: ActiveTopic): Promise<void> {
   if (switchingTopic) return
   switchingTopic = true
 
-  active = { topicId: t.id, title: t.title }
-  await saveActiveTopicId(bridge, t.id)
-  history = historyFor(t.id)
+  active = t
+  await saveActiveTopicId(bridge, t.topicId)
+  history = historyFor(t.topicId)
 
   mode = 'idle'
   transcriptText = ''
@@ -490,9 +502,9 @@ async function switchToTopic(t: Topic): Promise<void> {
   if (shouldRefreshHistoryOnTopicSwitch(history)) {
     if (history.length === 0) setDoc('Loading…')
     try {
-      const msgs = await tg!.getTopicHistory(groupId(), t.id, 20)
+      const msgs = await tg!.getTopicHistory(groupId(), t.threadId, 20)
       // Guard: user may have switched away while loading.
-      if (active?.topicId === t.id) {
+      if (active?.topicId === t.topicId) {
         seedHistory(history, messagesToLog(msgs))
       }
     } catch (err) {
