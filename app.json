@@ -2,7 +2,7 @@
   "package_id": "ergram.tiago.tools",
   "edition": "202601",
   "name": "ERGram",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.10",
   "entrypoint": "index.html",
@@ -17,6 +17,7 @@
       "whitelist": [
         "wss://stt-rt.soniox.com",
         "https://stt-rt.soniox.com",
+        "https://my.telegram.org",
         "wss://pluto.web.telegram.org",
         "wss://venus.web.telegram.org",
         "wss://aurora.web.telegram.org",
