@@ -25,6 +25,7 @@ import { messagesToLog, type TgMessage } from './telegram/messages'
 import type { Topic } from './telegram/topics'
 import { upsertMsg, reconcileSend, seedHistory, type Msg } from './conversation'
 import { renderConversation } from './glasses/render'
+import { applyIncomingMessage, shouldRefreshHistoryOnTopicSwitch } from './topic-state'
 
 // ── Geometry & rules ──
 // Container is 576x288 with paddingLength 4 → 568px text width, 10 lines @ 27px.
@@ -401,15 +402,10 @@ function sendTurn(userText: string): void {
 // Upsert by id so edits (e.g. a bot streaming/correcting) update in place. Our
 // own outgoing messages also arrive here and upsert onto the reconciled id.
 function onTgMessage(m: TgMessage): void {
-  if (!active) return
-  if (m.chatId !== groupId()) return
-  if (m.topicId !== active.topicId) return
-  const text = m.text.trim()
-  if (!text) return
+  const changedActive = applyIncomingMessage(histories, active, groupId(), m)
+  if (!changedActive || !active) return
 
-  const log = historyFor(active.topicId)
-  appendMsg(log, { id: m.id, from: m.from, text, mine: m.mine })
-  history = log
+  history = historyFor(active.topicId)
 
   // Don't disturb an in-progress dictation: the message is stored above and will
   // render once listening ends (via composeDoc). Only repaint when idle in convo.
@@ -491,8 +487,8 @@ async function switchToTopic(t: Topic): Promise<void> {
 
   await showTextContainer(' ') // switch container type back from list → text
 
-  if (history.length === 0) {
-    setDoc('Loading…')
+  if (shouldRefreshHistoryOnTopicSwitch(history)) {
+    if (history.length === 0) setDoc('Loading…')
     try {
       const msgs = await tg!.getTopicHistory(groupId(), t.id, 20)
       // Guard: user may have switched away while loading.
