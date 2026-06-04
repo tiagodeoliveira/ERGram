@@ -23,7 +23,7 @@ import { getTextWidth } from '@evenrealities/pretext'
 import { TgClient } from './telegram/client'
 import { messagesToLog, type TgMessage } from './telegram/messages'
 import type { Topic } from './telegram/topics'
-import { upsertMsg, reconcileSend, type Msg } from './conversation'
+import { upsertMsg, reconcileSend, seedHistory, type Msg } from './conversation'
 import { renderConversation } from './glasses/render'
 
 // ── Geometry & rules ──
@@ -52,6 +52,11 @@ type View = 'convo' | 'picker'
 
 const bridge = await waitForEvenAppBridge()
 let settings = await loadSettings(bridge)
+
+// Group id can be entered with stray whitespace; normalize it everywhere.
+function groupId(): string {
+  return settings.tgGroupId.trim()
+}
 
 // ── Telegram client (single module-level instance) ──
 let tg: TgClient | null = null
@@ -82,7 +87,6 @@ let mode: Mode = 'idle'
 let view: View = 'convo'
 let stt: SttClient | null = null
 let transcriptText = ''
-let replyText = ''
 
 // Bound on-glasses scrollback per topic. The line-window only ever writes ~10
 // lines per frame, so this can be generous without enlarging BLE writes — it
@@ -109,7 +113,7 @@ const uiHandle = mountUi(settings, {
     settings = s
     await saveSettings(bridge, s)
     flashSaved()
-    if (view === 'convo' && mode === 'idle' && !transcriptText && !replyText) reflectIdle()
+    if (view === 'convo' && mode === 'idle' && !transcriptText) reflectIdle()
   },
   onTgLogin: async (creds, prompts) => {
     tg = new TgClient(creds)
@@ -121,7 +125,7 @@ const uiHandle = mountUi(settings, {
     tg.subscribe(onTgMessage)
     // Reflect the new state on the glasses immediately (→ topic list once a group
     // id is also set), so there's no "reopen the app" step after onboarding.
-    if (view === 'convo' && mode === 'idle' && !transcriptText && !replyText) reflectIdle()
+    if (view === 'convo' && mode === 'idle' && !transcriptText) reflectIdle()
     const me = await tg.client.getMe()
     return '@' + (((me as unknown as { username?: string; firstName?: string }).username) ?? ((me as unknown as { firstName?: string }).firstName) ?? 'you')
   },
@@ -269,7 +273,6 @@ function isConfigured(): boolean {
 function reflectIdle(): void {
   mode = 'idle'
   transcriptText = ''
-  replyText = ''
   followTail = true
 
   if (!isConfigured()) {
@@ -295,7 +298,6 @@ function startListening(): void {
     return
   }
   transcriptText = ''
-  replyText = ''
   followTail = true
   lineOffset = 0
   setTranscript('', '')
@@ -351,7 +353,6 @@ async function stopListening(): Promise<void> {
     setStatus('idle', 'Transcribed · connect Telegram to chat')
     setDoc(composeDoc())
     transcriptText = ''
-    replyText = ''
   }
 }
 
@@ -369,7 +370,6 @@ function sendTurn(userText: string): void {
 
   mode = 'idle'
   transcriptText = ''
-  replyText = ''
   followTail = true
   setStatus('idle', `Ready · ${active.title}`)
   if (active.topicId === topicId) {
@@ -377,7 +377,7 @@ function sendTurn(userText: string): void {
     setDoc(composeDoc())
   }
 
-  tg.sendToTopic(settings.tgGroupId, topicId, userText)
+  tg.sendToTopic(groupId(), topicId, userText)
     .then((realId: number) => {
       reconcileSend(target, tempId, realId)
       if (active?.topicId === topicId) {
@@ -402,7 +402,7 @@ function sendTurn(userText: string): void {
 // own outgoing messages also arrive here and upsert onto the reconciled id.
 function onTgMessage(m: TgMessage): void {
   if (!active) return
-  if (m.chatId !== settings.tgGroupId.trim()) return
+  if (m.chatId !== groupId()) return
   if (m.topicId !== active.topicId) return
   const text = m.text.trim()
   if (!text) return
@@ -433,7 +433,7 @@ let pickerBusy = false
 
 async function enterPicker(): Promise<void> {
   if (pickerBusy) return
-  if (!tg || !settings.tgGroupId) {
+  if (!tg || !groupId()) {
     reflectIdle()
     return
   }
@@ -446,7 +446,7 @@ async function enterPicker(): Promise<void> {
   )
 
   try {
-    topicList = await tg.getForumTopics(settings.tgGroupId)
+    topicList = await tg.getForumTopics(groupId())
   } catch (err) {
     console.error('getForumTopics failed:', err)
     topicList = []
@@ -483,7 +483,6 @@ async function switchToTopic(t: Topic): Promise<void> {
 
   mode = 'idle'
   transcriptText = ''
-  replyText = ''
   followTail = true
   lineOffset = 0
   view = 'convo'
@@ -493,10 +492,10 @@ async function switchToTopic(t: Topic): Promise<void> {
   if (history.length === 0) {
     setDoc('Loading…')
     try {
-      const msgs = await tg!.getTopicHistory(settings.tgGroupId, t.id, 20)
+      const msgs = await tg!.getTopicHistory(groupId(), t.id, 20)
       // Guard: user may have switched away while loading.
-      if (active?.topicId === t.id && history.length === 0) {
-        history.push(...messagesToLog(msgs))
+      if (active?.topicId === t.id) {
+        seedHistory(history, messagesToLog(msgs))
       }
     } catch (err) {
       console.error('getTopicHistory failed:', err)
@@ -548,7 +547,7 @@ const unsubscribe = bridge.onEvenHubEvent((event) => {
       // second DOUBLE_CLICK the firmware emits for one physical double-tap).
       if (view === 'picker') return
       if (mode === 'listening') void cancelListening() // dictating → cancel the message
-      else if (tg && settings.tgGroupId) void enterPicker() // chat → back to list
+      else if (tg && groupId()) void enterPicker() // chat → back to list
       return
     case OsEventTypeList.SYSTEM_EXIT_EVENT:
     case OsEventTypeList.ABNORMAL_EXIT_EVENT:

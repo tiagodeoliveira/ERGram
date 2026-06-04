@@ -79,7 +79,9 @@ export class TgClient {
     const opts: Record<string, unknown> = { message: text }
     if (threadId) opts.replyTo = threadId
     const sent = await this.client.sendMessage(chatId, opts)
-    return (sent as unknown as { id: number }).id
+    const id = (sent as unknown as { id?: number }).id
+    if (typeof id !== 'number') throw new Error('sendMessage returned no message id')
+    return id
   }
 
   /** Newest-last list of normalized messages for a topic. */

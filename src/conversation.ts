@@ -37,3 +37,13 @@ export function reconcileSend(log: Msg[], tempId: number, realId: number): void 
     temp.id = realId
   }
 }
+
+// Merge freshly-fetched topic history into a log that may already contain
+// messages that arrived live during the fetch. De-dupes by id (keeping the
+// entry already in `log`) and prepends the older fetched messages, preserving
+// chronological order (history is older; live arrivals have higher ids).
+export function seedHistory(log: Msg[], history: Msg[]): void {
+  const have = new Set(log.map((m) => m.id))
+  const fresh = history.filter((m) => !have.has(m.id))
+  log.unshift(...fresh)
+}
