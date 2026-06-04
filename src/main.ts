@@ -411,7 +411,9 @@ function onTgMessage(m: TgMessage): void {
   appendMsg(log, { id: m.id, from: m.from, text, mine: m.mine })
   history = log
 
-  if (view === 'convo') {
+  // Don't disturb an in-progress dictation: the message is stored above and will
+  // render once listening ends (via composeDoc). Only repaint when idle in convo.
+  if (view === 'convo' && mode !== 'listening') {
     mode = 'idle'
     setStatus('idle', `Ready · ${active.title}`)
     setDoc(composeDoc())
