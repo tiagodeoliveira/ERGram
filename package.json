@@ -3,7 +3,7 @@
   "description": "Talk on a Telegram group from Even Realities G2 smart glasses: push-to-talk voice, transcribed by Soniox and sent via a Telegram userbot.",
   "license": "MIT",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "scripts": {
     "dev": "vite",

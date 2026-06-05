@@ -12,9 +12,9 @@ import { startSttStream, type SttClient } from './asr/stt'
 import {
   loadSettings,
   saveSettings,
-  saveActiveTopicId,
   canTranscribe,
   hasTelegram,
+  hasPins,
   canChat,
 } from './settings'
 import { mountUi, setStatus, flashSaved } from './ui'
@@ -25,7 +25,11 @@ import { messagesToLog, type TgMessage } from './telegram/messages'
 import type { Topic } from './telegram/topics'
 import { upsertMsg, reconcileSend, seedHistory, type Msg } from './conversation'
 import { renderConversation } from './glasses/render'
-import { applyIncomingMessage, shouldRefreshHistoryOnTopicSwitch } from './topic-state'
+import {
+  applyIncomingMessage,
+  historyFor,
+  shouldRefreshHistoryOnTopicSwitch,
+} from './conversation-state'
 import {
   activeTopicFromForumTopic,
   MAIN_CHAT_TOPIC,
@@ -41,7 +45,7 @@ const VISIBLE_LINES = Math.floor((288 - 2 * PAD) / 27)
 const SCROLL_STEP = 3 // lines per swipe
 const HINT_IDLE = 'Tap temple to talk'
 const CONTAINER_ID = 1
-const CONTAINER_NAME = 'ergram' // shared by the text view and the topic list
+const CONTAINER_NAME = 'ergram' // shared by the text view and the list pickers
 
 // Near-full-width rules sized just under the text width so they never wrap.
 // Heavy (━) separates turns; light (─) separates you from the reply within a turn.
@@ -55,32 +59,46 @@ const LISTENING_HEADER = `● Listening…   tap: send · 2-tap: cancel\n${SPEAK
 
 // ── Types ──
 type Mode = 'idle' | 'listening'
-type View = 'convo' | 'picker'
+
+/** The conversation a chat/topic frame is anchored to (a pinned dialog). */
+interface ActiveConversation {
+  id: string // marked chat id (matches TgMessage.chatId)
+  title: string
+  isForum: boolean
+}
+
+// Navigation is a stack of frames; the top frame is the current view. A click
+// descends (pushes the next picker, or a chat if the selection is a leaf); a
+// double-tap pops one level. The conversation list is the home (length 1).
+type Frame =
+  | { kind: 'conversations' }
+  | { kind: 'topics'; conv: ActiveConversation }
+  | { kind: 'chat'; conv: ActiveConversation; topic: ActiveTopic }
+
+let stack: Frame[] = [{ kind: 'conversations' }]
+function top(): Frame {
+  return stack[stack.length - 1]
+}
+function activeChat(): { conv: ActiveConversation; topic: ActiveTopic } | null {
+  const f = top()
+  return f.kind === 'chat' ? { conv: f.conv, topic: f.topic } : null
+}
+function isActiveChat(chatId: string, topicId: number): boolean {
+  const ac = activeChat()
+  return !!ac && ac.conv.id === chatId && ac.topic.topicId === topicId
+}
+function chatLabel(conv: ActiveConversation, topic: ActiveTopic): string {
+  return conv.isForum ? `${conv.title} · ${topic.title}` : conv.title
+}
 
 const bridge = await waitForEvenAppBridge()
 let settings = await loadSettings(bridge)
 
-// Group id can be entered with stray whitespace; normalize it everywhere.
-function groupId(): string {
-  return settings.tgGroupId.trim()
-}
-
 // ── Telegram client (single module-level instance) ──
 let tg: TgClient | null = null
 
-// ── Topic state. Each topic keeps its own scrollable conversation log. ──
-const histories = new Map<number, Msg[]>()
-function historyFor(id: number): Msg[] {
-  let h = histories.get(id)
-  if (!h) {
-    h = []
-    histories.set(id, h)
-  }
-  return h
-}
-
-let active: ActiveTopic | null = null
-let history: Msg[] = []
+// ── Conversation state. Each (chatId, topicId) keeps its own scrollable log. ──
+const histories = new Map<string, Msg[]>()
 
 // Optimistic placeholders use decreasing negative ids so they never collide
 // with real (positive) Telegram message ids.
@@ -89,13 +107,13 @@ function nextLocalId(): number {
   return localSeq--
 }
 
-// ── Turn / view state ──
+// ── Turn state ──
 let mode: Mode = 'idle'
-let view: View = 'convo'
 let stt: SttClient | null = null
 let transcriptText = ''
+let history: Msg[] = [] // the active chat's log (composeDoc renders this)
 
-// Bound on-glasses scrollback per topic. The line-window only ever writes ~10
+// Bound on-glasses scrollback per log. The line-window only ever writes ~10
 // lines per frame, so this can be generous without enlarging BLE writes — it
 // just sets how far back you can swipe.
 const HISTORY_CHAR_BUDGET = 24000
@@ -124,7 +142,8 @@ const uiHandle = mountUi(settings, {
     settings = s
     await saveSettings(bridge, s)
     flashSaved()
-    if (view === 'convo' && mode === 'idle' && !transcriptText) reflectIdle()
+    // Repaint home if a settings/pin change happened while idle on a picker.
+    if (mode === 'idle' && !transcriptText && !activeChat()) reflectIdle()
   },
   onTgLogin: async (creds, prompts) => {
     tg = new TgClient(creds)
@@ -134,9 +153,9 @@ const uiHandle = mountUi(settings, {
     await saveSettings(bridge, settings)
     uiHandle.updateSession(session)
     tg.subscribe(onTgMessage)
-    // Reflect the new state on the glasses immediately (→ topic list once a group
-    // id is also set), so there's no "reopen the app" step after onboarding.
-    if (view === 'convo' && mode === 'idle' && !transcriptText) reflectIdle()
+    // Reflect the new state on the glasses immediately so there's no "reopen the
+    // app" step after onboarding.
+    if (mode === 'idle' && !transcriptText && !activeChat()) reflectIdle()
     const me = await tg.client.getMe()
     return (
       '@' +
@@ -150,6 +169,10 @@ const uiHandle = mountUi(settings, {
     tg = null
     settings = { ...settings, tgSession: '' }
     await saveSettings(bridge, settings)
+  },
+  onLoadDialogs: async () => {
+    if (!tg) throw new Error('Connect Telegram first')
+    return tg.getDialogs()
   },
 })
 
@@ -178,7 +201,7 @@ function windowContent(): string {
   return [...pinnedLines, ...body].join('\n') || ' '
 }
 async function pushWindow(): Promise<void> {
-  if (view !== 'convo') return // never write text to the list container
+  if (top().kind !== 'chat') return // never write text to a list container
   const content = windowContent()
   if (content === lastRender) return
   lastRender = content
@@ -260,6 +283,11 @@ async function showTextContainer(content: string): Promise<void> {
   )
   lastRender = content
 }
+async function showListContainer(labels: string[]): Promise<void> {
+  await bridge.rebuildPageContainer(
+    new RebuildPageContainer({ containerTotalNum: 1, listObject: [pickerContainer(labels)] }),
+  )
+}
 
 // ── Flat-log rendering ──
 function listeningBody(): string {
@@ -268,7 +296,7 @@ function listeningBody(): string {
 function composeDoc(): string {
   return renderConversation(history, SPEAKER_DIVIDER) || HINT_IDLE
 }
-// Upsert a message into a topic's log, then trim it to the scrollback budget.
+// Upsert a message into a log, then trim it to the scrollback budget.
 function appendMsg(log: Msg[], msg: Msg): void {
   upsertMsg(log, msg)
   let total = log.reduce((n, m) => n + m.from.length + m.text.length + 16, 0)
@@ -278,34 +306,158 @@ function appendMsg(log: Msg[], msg: Msg): void {
   }
 }
 
-// ── State transitions ──
-// Fully set up = Soniox key + live Telegram session + a target group. Until then
-// the glasses show a single "configure" prompt; once ready they go straight to
-// the topic list (no intermediate "tap temple" screen).
+// ── Setup gating ──
+// A hint string while the app isn't fully ready; null once it is (Soniox key +
+// live Telegram session + at least one pinned conversation).
+function setupHint(): string | null {
+  if (!canTranscribe(settings)) return 'Add your Soniox key in the app'
+  if (!tg || !hasTelegram(settings)) return 'Connect Telegram in the app'
+  if (!hasPins(settings)) return 'Pin conversations in the app'
+  return null
+}
 function isConfigured(): boolean {
-  return !!tg && canChat(settings)
+  return setupHint() === null
 }
 
+// ── Frame rendering ──
+// Repaint whatever the top frame is. Used on navigation (push/pop) and idle.
+async function renderTop(): Promise<void> {
+  const f = top()
+  if (f.kind === 'conversations') await showConversationsPicker()
+  else if (f.kind === 'topics') await showTopicsPicker(f.conv)
+  else await enterChat(f.conv, f.topic)
+}
+
+// Lightweight idle repaint: refresh the active chat in place, or rebuild the
+// current picker. Avoids re-seeding history when we're just returning to idle.
 function reflectIdle(): void {
   mode = 'idle'
   transcriptText = ''
   followTail = true
 
-  if (!isConfigured()) {
-    setStatus('idle', 'Configure ERGram in the app')
-    setDoc('Configure ERGram in the app')
+  const ac = activeChat()
+  if (ac) {
+    setStatus('idle', `Ready · ${chatLabel(ac.conv, ac.topic)}`)
+    setDoc(composeDoc())
+    return
+  }
+  void renderTop()
+}
+
+async function showConversationsPicker(): Promise<void> {
+  const hint = setupHint()
+  if (hint) {
+    await showTextContainer(hint)
+    setStatus('idle', hint)
+    return
+  }
+  await showListContainer(settings.pinnedConversations.map((p) => p.title))
+  setStatus('idle', 'Pick a conversation')
+}
+
+// ── Topic picker (Level 1, forum supergroups only) ──
+let topicList: Topic[] = []
+let pickerBusy = false
+
+async function showTopicsPicker(conv: ActiveConversation): Promise<void> {
+  if (pickerBusy) return
+  if (!tg) {
+    reflectIdle()
+    return
+  }
+  pickerBusy = true
+
+  await showListContainer(['Loading topics…'])
+
+  try {
+    topicList = await tg.getForumTopics(conv.id)
+  } catch (err) {
+    console.error('getForumTopics failed:', err)
+    topicList = []
+  }
+
+  if (!shouldShowTopicPicker(topicList)) {
+    // No topics after all → collapse this level into the main chat.
+    pickerBusy = false
+    if (top().kind === 'topics') stack.pop()
+    const topic = MAIN_CHAT_TOPIC
+    stack.push({ kind: 'chat', conv, topic })
+    await enterChat(conv, topic)
     return
   }
 
-  // Configured but no topic picked yet → open the topic list directly.
-  if (!active) {
-    void enterPicker()
-    return
+  if (top().kind === 'topics') {
+    await showListContainer(topicList.map((t) => `  ${t.title}`))
+    setStatus('idle', `${conv.title} · pick a topic`)
+  }
+  pickerBusy = false
+}
+
+// ── Chat (leaf) ──
+let switchingChat = false
+
+async function enterChat(conv: ActiveConversation, topic: ActiveTopic): Promise<void> {
+  if (switchingChat) return
+  switchingChat = true
+
+  history = historyFor(histories, conv.id, topic.topicId)
+  mode = 'idle'
+  transcriptText = ''
+  followTail = true
+  lineOffset = 0
+
+  await showTextContainer(' ') // switch container type back from list → text
+
+  if (shouldRefreshHistoryOnTopicSwitch(history)) {
+    if (history.length === 0) setDoc('Loading…')
+    try {
+      const msgs = await tg!.getTopicHistory(conv.id, topic.threadId, 20)
+      // Guard: user may have navigated away while loading.
+      if (isActiveChat(conv.id, topic.topicId)) {
+        seedHistory(history, messagesToLog(msgs))
+      }
+    } catch (err) {
+      console.error('getTopicHistory failed:', err)
+    }
   }
 
-  // Inside a topic → show its conversation.
-  setStatus('idle', `Ready · ${active.title}`)
-  setDoc(composeDoc())
+  switchingChat = false
+  if (isActiveChat(conv.id, topic.topicId)) {
+    setStatus('idle', `Ready · ${chatLabel(conv, topic)}`)
+    setDoc(composeDoc())
+  }
+}
+
+// ── Navigation ──
+function selectConversation(index: number): void {
+  const p = settings.pinnedConversations[index]
+  if (!p) return
+  const conv: ActiveConversation = { id: p.id, title: p.title, isForum: p.isForum }
+  if (p.isForum) {
+    stack.push({ kind: 'topics', conv })
+    void showTopicsPicker(conv)
+  } else {
+    const topic = MAIN_CHAT_TOPIC
+    stack.push({ kind: 'chat', conv, topic })
+    void enterChat(conv, topic)
+  }
+}
+
+function selectTopic(index: number): void {
+  const f = top()
+  if (f.kind !== 'topics') return
+  const t = topicList[index]
+  if (!t) return
+  const topic = activeTopicFromForumTopic(t)
+  stack.push({ kind: 'chat', conv: f.conv, topic })
+  void enterChat(f.conv, topic)
+}
+
+// Double-tap: climb one level. No-op at the conversation list (home).
+function popLevel(): void {
+  if (stack.length <= 1) return
+  stack.pop()
+  void renderTop()
 }
 
 function startListening(): void {
@@ -353,30 +505,25 @@ async function stopListening(): Promise<void> {
   stt = null
 
   const text = transcriptText.trim()
-
   if (!text) {
     reflectIdle()
     return
   }
-  if (canChat(settings) && active) {
+  if (tg && canChat(settings) && activeChat()) {
     sendTurn(text)
   } else {
-    appendMsg(history, { id: nextLocalId(), from: '', text, mine: true })
-    mode = 'idle'
-    setStatus('idle', 'Transcribed · connect Telegram to chat')
-    setDoc(composeDoc())
-    transcriptText = ''
+    reflectIdle()
   }
 }
 
 function sendTurn(userText: string): void {
-  if (!tg || !active) {
+  const ac = activeChat()
+  if (!tg || !ac) {
     reflectIdle()
     return
   }
-  const topicId = active.topicId
-  const threadId = active.threadId
-  const target = historyFor(topicId)
+  const { conv, topic } = ac
+  const target = historyFor(histories, conv.id, topic.topicId)
 
   // Optimistic local echo for instant feedback; reconcile against the real id.
   const tempId = nextLocalId()
@@ -385,16 +532,16 @@ function sendTurn(userText: string): void {
   mode = 'idle'
   transcriptText = ''
   followTail = true
-  setStatus('idle', `Ready · ${active.title}`)
-  if (active.topicId === topicId) {
+  setStatus('idle', `Ready · ${chatLabel(conv, topic)}`)
+  if (isActiveChat(conv.id, topic.topicId)) {
     history = target
     setDoc(composeDoc())
   }
 
-  tg.sendToTopic(groupId(), threadId, userText)
+  tg.sendToTopic(conv.id, topic.threadId, userText)
     .then((realId: number) => {
       reconcileSend(target, tempId, realId)
-      if (active?.topicId === topicId) {
+      if (isActiveChat(conv.id, topic.topicId)) {
         history = target
         setDoc(composeDoc())
       }
@@ -402,7 +549,7 @@ function sendTurn(userText: string): void {
     .catch((err: unknown) => {
       const temp = target.find((m) => m.id === tempId)
       if (temp) temp.text = `${userText}  (send failed)`
-      if (active?.topicId === topicId) {
+      if (isActiveChat(conv.id, topic.topicId)) {
         history = target
         setStatus('error', `Send failed: ${(err as Error)?.message ?? err}`)
         setDoc(composeDoc())
@@ -411,141 +558,61 @@ function sendTurn(userText: string): void {
 }
 
 // ── Incoming Telegram messages (new + edits from subscribe) ──
-// React to every sender (humans and bots), scoped to the active group + topic.
+// React to every sender (humans and bots), scoped to the set of pinned chats.
 // Upsert by id so edits (e.g. a bot streaming/correcting) update in place. Our
 // own outgoing messages also arrive here and upsert onto the reconciled id.
 function onTgMessage(m: TgMessage): void {
-  const changedActive = applyIncomingMessage(histories, active, groupId(), m)
-  if (!changedActive || !active) return
+  const pinnedIds = new Set(settings.pinnedConversations.map((p) => p.id))
+  const ac = activeChat()
+  const activeRef = ac ? { chatId: ac.conv.id, topicId: ac.topic.topicId } : null
 
-  history = historyFor(active.topicId)
+  const changedActive = applyIncomingMessage(histories, pinnedIds, activeRef, m)
+  if (!changedActive || !ac) return
+
+  history = historyFor(histories, ac.conv.id, ac.topic.topicId)
 
   // Don't disturb an in-progress dictation: the message is stored above and will
-  // render once listening ends (via composeDoc). Only repaint when idle in convo.
-  if (view === 'convo' && mode !== 'listening') {
+  // render once listening ends (via composeDoc). Only repaint when idle in chat.
+  if (top().kind === 'chat' && mode !== 'listening') {
     mode = 'idle'
-    setStatus('idle', `Ready · ${active.title}`)
+    setStatus('idle', `Ready · ${chatLabel(ac.conv, ac.topic)}`)
     setDoc(composeDoc())
   }
 }
 
 function toggle(): void {
   if (mode === 'idle') {
-    // Only meaningful inside a topic; on the picker/config screen it's a no-op.
-    if (active && isConfigured()) startListening()
+    // Only meaningful inside a chat; on a picker/config screen it's a no-op.
+    if (activeChat() && isConfigured()) startListening()
   } else if (mode === 'listening') {
     void stopListening()
   }
 }
 
-// ── Topic picker (a list container swapped in over the conversation) ──
-let topicList: Topic[] = []
-let pickerBusy = false
-
-async function enterPicker(): Promise<void> {
-  if (pickerBusy) return
-  if (!tg || !groupId()) {
-    reflectIdle()
-    return
-  }
-  pickerBusy = true
-  view = 'picker'
-
-  // Show a placeholder list while we fetch.
-  await bridge.rebuildPageContainer(
-    new RebuildPageContainer({
-      containerTotalNum: 1,
-      listObject: [pickerContainer(['Loading topics…'])],
-    }),
-  )
-
-  try {
-    topicList = await tg.getForumTopics(groupId())
-  } catch (err) {
-    console.error('getForumTopics failed:', err)
-    topicList = []
-  }
-
-  if (!shouldShowTopicPicker(topicList)) {
-    pickerBusy = false
-    await switchToTopic(MAIN_CHAT_TOPIC)
-    return
-  }
-
-  const labels = topicList.map((t) =>
-    active && t.id === active.topicId ? `* ${t.title}` : `  ${t.title}`,
-  )
-
-  if (view === 'picker') {
-    // Still in picker view — refresh the list.
-    await bridge.rebuildPageContainer(
-      new RebuildPageContainer({ containerTotalNum: 1, listObject: [pickerContainer(labels)] }),
-    )
-  }
-  pickerBusy = false
-}
-
-function selectPicker(index: number): void {
-  const t = topicList[index]
-  if (t) void switchToTopic(activeTopicFromForumTopic(t))
-}
-
-let switchingTopic = false
-
-async function switchToTopic(t: ActiveTopic): Promise<void> {
-  if (switchingTopic) return
-  switchingTopic = true
-
-  active = t
-  await saveActiveTopicId(bridge, t.topicId)
-  history = historyFor(t.topicId)
-
-  mode = 'idle'
-  transcriptText = ''
-  followTail = true
-  lineOffset = 0
-  view = 'convo'
-
-  await showTextContainer(' ') // switch container type back from list → text
-
-  if (shouldRefreshHistoryOnTopicSwitch(history)) {
-    if (history.length === 0) setDoc('Loading…')
-    try {
-      const msgs = await tg!.getTopicHistory(groupId(), t.threadId, 20)
-      // Guard: user may have switched away while loading.
-      if (active?.topicId === t.topicId) {
-        seedHistory(history, messagesToLog(msgs))
-      }
-    } catch (err) {
-      console.error('getTopicHistory failed:', err)
-    }
-  }
-
-  switchingTopic = false
-  reflectIdle()
-}
-
 // ── First paint ──
-// reflectIdle() decides: configured → topic list, otherwise the configure prompt.
 reflectIdle()
 
 // ── Event routing ──
 // Protobuf omits zero-value fields, so CLICK_EVENT (0) arrives as `undefined`.
 // List row-select → listEvent; swipe scroll → textEvent; taps/lifecycle → sysEvent;
 // audio PCM → audioEvent.
+let lastDoubleAt = 0 // debounce the firmware's stray second DOUBLE_CLICK
 const unsubscribe = bridge.onEvenHubEvent((event) => {
   const pcm = event.audioEvent?.audioPcm
   if (pcm && mode === 'listening') stt?.sendPcm(pcm)
 
-  // Topic picker: single-tap on a row selects it.
+  // Pickers: single-tap on a row selects it (descend one level).
   if (event.listEvent) {
-    if (view === 'picker') selectPicker(event.listEvent.currentSelectItemIndex ?? 0)
+    const idx = event.listEvent.currentSelectItemIndex ?? 0
+    const kind = top().kind
+    if (kind === 'conversations') selectConversation(idx)
+    else if (kind === 'topics') selectTopic(idx)
     return
   }
 
-  // Swipe scroll only applies to the conversation (the list scrolls natively).
+  // Swipe scroll only applies to the chat (the list scrolls natively).
   const textType = event.textEvent?.eventType ?? null
-  if (view === 'convo') {
+  if (top().kind === 'chat') {
     if (textType === OsEventTypeList.SCROLL_TOP_EVENT) {
       scrollLines(-SCROLL_STEP)
       return
@@ -561,14 +628,16 @@ const unsubscribe = bridge.onEvenHubEvent((event) => {
   const sysType = sys.eventType ?? 0
 
   switch (sysType) {
-    case OsEventTypeList.DOUBLE_CLICK_EVENT:
-      // Picker is home — double-tap there does nothing (and absorbs the stray
-      // second DOUBLE_CLICK the firmware emits for one physical double-tap).
-      if (view === 'picker') return
-      if (mode === 'listening')
-        void cancelListening() // dictating → cancel the message
-      else if (tg && groupId()) void enterPicker() // chat → back to list
+    case OsEventTypeList.DOUBLE_CLICK_EVENT: {
+      // One physical double-tap can emit two DOUBLE_CLICK events; debounce so a
+      // single gesture only acts once (cancel a dictation, else climb a level).
+      const now = Date.now()
+      if (now - lastDoubleAt < 500) return
+      lastDoubleAt = now
+      if (mode === 'listening') void cancelListening()
+      else popLevel()
       return
+    }
     case OsEventTypeList.SYSTEM_EXIT_EVENT:
     case OsEventTypeList.ABNORMAL_EXIT_EVENT:
       // The host drives exit (long-press → "Leave app?"); confirming it lands
@@ -582,12 +651,12 @@ const unsubscribe = bridge.onEvenHubEvent((event) => {
       if (mode === 'listening') void stopListening()
       return
     case OsEventTypeList.FOREGROUND_ENTER_EVENT:
-      if (view === 'convo') void pushWindow()
+      if (top().kind === 'chat') void pushWindow()
       return
     case OsEventTypeList.IMU_DATA_REPORT:
       return
     case OsEventTypeList.CLICK_EVENT: // single tap (we don't enable IMU, so 0 = tap)
-      if (view === 'convo' && !sys.imuData) toggle()
+      if (top().kind === 'chat' && !sys.imuData) toggle()
       return
   }
 })

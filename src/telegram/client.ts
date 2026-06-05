@@ -5,6 +5,26 @@ import { NewMessage, NewMessageEvent } from 'telegram/events'
 import { EditedMessage, EditedMessageEvent } from 'telegram/events/EditedMessage'
 import { senderLabel, topicIdOf, type TgMessage } from './messages'
 import { normalizeForumTopics, type Topic } from './topics'
+import { classifyDialog, pinnableDialogs, type Dialog, type RawDialog } from '../dialogs'
+
+// Structural views of the GramJS dialog/entity shapes we read (avoids `any`).
+interface RawEntityLike {
+  className: string
+  bot?: boolean
+  megagroup?: boolean
+  broadcast?: boolean
+  forum?: boolean
+  creator?: boolean
+  adminRights?: { postMessages?: boolean } | null
+  left?: boolean
+  deactivated?: boolean
+}
+interface RawDialogLike {
+  id?: { toString(): string }
+  title?: string
+  name?: string
+  entity?: unknown
+}
 
 export interface TgCredentials {
   apiId: number
@@ -59,6 +79,17 @@ export class TgClient {
 
   async disconnect(): Promise<void> {
     await this.client.disconnect()
+  }
+
+  /** List the account's postable conversations (for the PWA pin list). */
+  async getDialogs(limit = 100): Promise<Dialog[]> {
+    const dialogs = await this.client.getDialogs({ limit })
+    const out: Dialog[] = []
+    for (const d of dialogs) {
+      const classified = classifyDialog(toRawDialog(d as unknown as RawDialogLike))
+      if (classified) out.push(classified)
+    }
+    return pinnableDialogs(out)
   }
 
   /** List the group's forum topics (for the glasses picker). */
@@ -154,5 +185,29 @@ export class TgClient {
       topicId: topicIdOf(x.replyTo),
       date: x.date || 0,
     }
+  }
+}
+
+// Map a GramJS dialog onto the minimal RawDialog that dialogs.ts classifies.
+// `dialog.id` is the marked peer id (same form as TgMessage.chatId), so pins
+// route correctly against incoming messages.
+function toRawDialog(d: RawDialogLike): RawDialog {
+  const e = d.entity as RawEntityLike | undefined
+  return {
+    id: d.id?.toString() ?? '',
+    title: d.title || d.name || '',
+    entity: e
+      ? {
+          className: e.className,
+          bot: e.bot,
+          megagroup: e.megagroup,
+          broadcast: e.broadcast,
+          forum: e.forum,
+          creator: e.creator,
+          adminRights: e.adminRights ? { postMessages: e.adminRights.postMessages } : undefined,
+          left: e.left,
+          deactivated: e.deactivated,
+        }
+      : null,
   }
 }
