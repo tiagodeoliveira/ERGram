@@ -2,10 +2,13 @@
 //
 // This is NOT what renders on the glasses — the glasses get a TextContainer
 // driven from main.ts. This panel is where you connect Telegram (step-by-step
-// wizard), configure the target group, and enter the Soniox key.
+// wizard), pin the conversations to surface on the glasses, and enter the
+// Soniox key.
 
 import type { LoginPrompts, TgCredentials } from './telegram/client'
 import type { Settings } from './settings'
+import { togglePin, canPinMore, MAX_PINS, type Pin } from './pins'
+import { filterDialogs, type Dialog } from './dialogs'
 
 export type Status = 'idle' | 'listening' | 'thinking' | 'error'
 
@@ -17,6 +20,8 @@ interface UiHandlers {
   /** Initiates Telegram login. Resolves with the connected @username on success. */
   onTgLogin: (creds: TgCredentials, prompts: LoginPrompts) => Promise<string>
   onTgLogout: () => void
+  /** Fetch the account's postable conversations for the pin list. */
+  onLoadDialogs: () => Promise<Dialog[]>
 }
 
 // ── Module-level DOM refs ─────────────────────────────────────────────────────
@@ -25,7 +30,13 @@ let savedEl: HTMLSpanElement
 
 // Settings form inputs
 let sonioxInput: HTMLInputElement
-let tgGroupIdInput: HTMLInputElement
+
+// Conversations section
+let convSearchInput: HTMLInputElement
+let convRefreshBtn: HTMLButtonElement
+let convCountEl: HTMLSpanElement
+let convStatusEl: HTMLDivElement
+let convListEl: HTMLDivElement
 
 // Wizard step containers
 let stepKeys: HTMLDivElement
@@ -56,6 +67,12 @@ let resolvePassword: ((p: string) => void) | null = null
 
 // Preserved session string (updated on login; survives plain settings saves).
 let currentSession = ''
+
+// Conversations state
+let pins: Pin[] = []
+let allDialogs: Dialog[] = []
+let dialogsLoaded = false
+let loadDialogs: (() => Promise<Dialog[]>) | null = null
 
 // ── Wizard helpers ────────────────────────────────────────────────────────────
 
@@ -99,6 +116,84 @@ function setTgStatus(kind: 'error' | 'ok' | '', text: string): void {
   tgStatusEl.textContent = text
 }
 
+// ── Conversations helpers ──────────────────────────────────────────────────────
+
+function escapeHtml(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
+  )
+}
+
+function setConvStatus(kind: 'error' | '', text: string): void {
+  convStatusEl.className = kind ? `conv-status conv-status-${kind}` : 'conv-status'
+  convStatusEl.textContent = text
+}
+
+function rowHtml(id: string, title: string, pinned: boolean, enabled: boolean): string {
+  const star = pinned ? '★' : '☆'
+  const cls = `conv-row${pinned ? ' pinned' : enabled ? '' : ' disabled'}`
+  return (
+    `<button type="button" class="${cls}" data-id="${escapeHtml(id)}">` +
+    `<span class="conv-star">${star}</span>` +
+    `<span class="conv-title">${escapeHtml(title || 'Untitled')}</span>` +
+    `</button>`
+  )
+}
+
+function renderConversations(): void {
+  convCountEl.textContent = `Pinned ${pins.length}/${MAX_PINS}`
+
+  const pinnedIds = new Set(pins.map((p) => p.id))
+  const candidates = filterDialogs(allDialogs, convSearchInput.value).filter(
+    (d) => !pinnedIds.has(d.id),
+  )
+
+  const rows: string[] = []
+  for (const p of pins) rows.push(rowHtml(p.id, p.title, true, true))
+  const roomy = canPinMore(pins)
+  for (const d of candidates) rows.push(rowHtml(d.id, d.title, false, roomy))
+
+  convListEl.innerHTML = rows.join('') || '<div class="conv-empty">No conversations</div>'
+}
+
+async function refreshDialogs(): Promise<void> {
+  if (!loadDialogs) return
+  setConvStatus('', 'Loading conversations…')
+  convRefreshBtn.disabled = true
+  try {
+    allDialogs = await loadDialogs()
+    dialogsLoaded = true
+    setConvStatus('', allDialogs.length ? '' : 'No conversations found')
+  } catch (err) {
+    setConvStatus('error', String((err as Error)?.message ?? err))
+  } finally {
+    convRefreshBtn.disabled = false
+    renderConversations()
+  }
+}
+
+// Show/hide the dialog controls based on whether Telegram is connected, and load
+// dialogs on first availability.
+function updateConvAvailability(): void {
+  const connected = currentSession.trim().length > 0
+  convSearchInput.style.display = connected ? '' : 'none'
+  convRefreshBtn.style.display = connected ? '' : 'none'
+
+  if (!connected) {
+    allDialogs = []
+    dialogsLoaded = false
+    setConvStatus('', 'Connect Telegram above to choose conversations.')
+    renderConversations()
+    return
+  }
+  if (!dialogsLoaded) {
+    void refreshDialogs()
+  } else {
+    renderConversations()
+  }
+}
+
 // ── Mount ─────────────────────────────────────────────────────────────────────
 
 export interface UiHandle {
@@ -108,6 +203,8 @@ export interface UiHandle {
 
 export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
   currentSession = initial.tgSession
+  pins = initial.pinnedConversations
+  loadDialogs = handlers.onLoadDialogs
 
   const app = document.querySelector<HTMLDivElement>('#app')!
   app.innerHTML = `
@@ -184,12 +281,20 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
           <div id="tg-status" class="tg-status"></div>
         </div>
 
-        <!-- ── Group ID ── -->
-        <label>Group ID
-          <input id="tg-group-id" type="text" inputmode="numeric" autocomplete="off"
-            spellcheck="false" placeholder="-1001234567890" />
-          <span class="field-hint">Telegram → group → copy link/id, e.g. -1001234567890</span>
-        </label>
+        <!-- ── Conversations ── -->
+        <div class="conv-section">
+          <div class="conv-head">
+            <span class="conv-section-title">Conversations</span>
+            <span id="conv-count" class="conv-count"></span>
+          </div>
+          <div class="conv-controls">
+            <input id="conv-search" type="text" autocomplete="off" spellcheck="false"
+              placeholder="Search conversations…" />
+            <button id="conv-refresh" type="button" class="ghost small">Refresh</button>
+          </div>
+          <div id="conv-status" class="conv-status"></div>
+          <div id="conv-list" class="conv-list"></div>
+        </div>
 
         <div class="actions">
           <button id="save" type="button">Save</button>
@@ -206,7 +311,12 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
   savedEl = app.querySelector<HTMLSpanElement>('#saved')!
 
   sonioxInput = app.querySelector<HTMLInputElement>('#soniox')!
-  tgGroupIdInput = app.querySelector<HTMLInputElement>('#tg-group-id')!
+
+  convSearchInput = app.querySelector<HTMLInputElement>('#conv-search')!
+  convRefreshBtn = app.querySelector<HTMLButtonElement>('#conv-refresh')!
+  convCountEl = app.querySelector<HTMLSpanElement>('#conv-count')!
+  convStatusEl = app.querySelector<HTMLDivElement>('#conv-status')!
+  convListEl = app.querySelector<HTMLDivElement>('#conv-list')!
 
   stepperEl = app.querySelector<HTMLDivElement>('#tg-stepper')!
   stepKeys = app.querySelector<HTMLDivElement>('#step-keys')!
@@ -227,7 +337,6 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
   sonioxInput.value = initial.sonioxKey
   apiIdInput.value = initial.tgApiId
   apiHashInput.value = initial.tgApiHash
-  tgGroupIdInput.value = initial.tgGroupId
 
   // Show the correct initial wizard step.
   const initialStep: Step = initial.tgSession ? 'connected' : 'keys'
@@ -235,6 +344,27 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
     connectedNameEl.textContent = '✅ Connected'
   }
   showStep(initialStep)
+  updateConvAvailability()
+
+  // ── Conversations handlers ────────────────────────────────────────────────
+  convSearchInput.addEventListener('input', renderConversations)
+  convRefreshBtn.addEventListener('click', () => void refreshDialogs())
+  convListEl.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('.conv-row')
+    if (!btn) return
+    const id = btn.getAttribute('data-id')
+    if (!id) return
+    const existing = pins.find((p) => p.id === id)
+    if (existing) {
+      pins = togglePin(pins, existing)
+    } else {
+      if (!canPinMore(pins)) return
+      const d = allDialogs.find((x) => x.id === id)
+      if (!d) return
+      pins = togglePin(pins, { id: d.id, title: d.title, kind: d.kind, isForum: d.isForum })
+    }
+    renderConversations()
+  })
 
   // ── Wizard button handlers ────────────────────────────────────────────────
 
@@ -294,6 +424,7 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
         connectedNameEl.textContent = `✅ Connected as @${username}`
         showStep('connected')
         flashSaved('Connected')
+        updateConvAvailability() // now connected → load dialogs for pinning
       })
       .catch((err: unknown) => {
         setTgStatus('error', String(err))
@@ -328,6 +459,7 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
     apiIdInput.value = ''
     apiHashInput.value = ''
     showStep('keys')
+    updateConvAvailability() // disconnected → hide dialog controls
   })
 
   // ── Save button ───────────────────────────────────────────────────────────
@@ -337,7 +469,7 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
       tgApiId: apiIdInput.value,
       tgApiHash: apiHashInput.value,
       tgSession: currentSession, // never typed; preserved from login or initial load
-      tgGroupId: tgGroupIdInput.value,
+      pinnedConversations: pins,
     })
   })
 
@@ -414,6 +546,29 @@ function injectStyles(): void {
     .tg-status-error { color: #c5363b; }
     .tg-status-ok { color: #2ea043; }
     .tg-connected { font-size: 15px; font-weight: 600; color: #1c1c1e; margin-bottom: 12px; }
+
+    /* Conversations */
+    .conv-section { margin: 4px 0 14px; padding-top: 12px; border-top: 1px solid #e5e5ea; }
+    .conv-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+    .conv-section-title { font-size: 12px; color: #6e6e73; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.04em; }
+    .conv-count { font-size: 11px; color: #8e8e93; font-weight: 600; }
+    .conv-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .conv-controls input { flex: 1; margin: 0; }
+    button.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
+    .conv-status { font-size: 12px; min-height: 16px; color: #6e6e73; margin-bottom: 8px; }
+    .conv-status-error { color: #c5363b; }
+    .conv-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+    .conv-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+      background: #ffffff; color: #1c1c1e; border: 1px solid #e5e5ea; border-radius: 10px;
+      padding: 10px 12px; font-size: 15px; font-weight: 500; }
+    .conv-row:active { background: #f2f2f7; }
+    .conv-row.pinned { border-color: #d97757; }
+    .conv-row.disabled { opacity: 0.45; }
+    .conv-star { font-size: 18px; color: #d97757; width: 18px; text-align: center; flex: none; }
+    .conv-row:not(.pinned) .conv-star { color: #c7c7cc; }
+    .conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conv-empty { font-size: 13px; color: #8e8e93; padding: 8px 2px; }
 
     .actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
     button { background: #000000; color: #ffffff; border: none; border-radius: 14px;
