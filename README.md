@@ -1,35 +1,39 @@
 # ERGram
 
-> Talk on a Telegram group from Even Realities G2 smart glasses — push-to-talk voice, transcribed and sent as you.
+> Talk on Telegram from Even Realities G2 smart glasses — push-to-talk voice, transcribed and sent as you.
 
 ER = Even Realities · Gram = Telegram.
 
 Push-to-talk voice on the glasses → [Soniox](https://soniox.com) real-time speech-to-text → your
-message is posted **into a Telegram topic as you** (via a GramJS MTProto userbot running in the PWA).
-Whatever responds in that topic — a bot/agent or another member — is read back onto the glasses. The
-PWA _is_ the whole app: it runs inside the Even Realities companion app, captures the glasses mic via
-the Even Hub SDK, and talks directly to Soniox and Telegram. No separate server.
+message is posted **into the conversation you picked, as you** (via a GramJS MTProto userbot running in
+the PWA). The conversation can be a 1:1, a bot, a channel you can post to, or a group — and for a forum
+group, a specific topic. Whatever responds there — a bot/agent or another member — is read back onto
+the glasses. The PWA _is_ the whole app: it runs inside the Even Realities companion app, captures the
+glasses mic via the Even Hub SDK, and talks directly to Soniox and Telegram. No separate server.
 
 ```
 Glasses mic ──(Even Hub SDK audioPcm)──►  this PWA  ──►  Soniox (real-time STT)
-   tap to talk · tap to send             (userbot)   ──►  Telegram topic ⇄ the group
+   tap to talk · tap to send             (userbot)   ──►  Telegram conversation ⇄ the chat
 ```
 
-Because the conversation lives in the Telegram topic, history is unified — what you say on the glasses
+Because the conversation lives in the Telegram chat, history is unified — what you say on the glasses
 appears in Telegram, and vice-versa.
 
-## Turn model
+## Navigation & turn model
 
-The G2 touchpad only emits discrete gestures (no press-and-hold), so push-to-talk is **tap-to-toggle**:
+The G2 touchpad only emits discrete gestures (no press-and-hold), so push-to-talk is **tap-to-toggle**,
+and navigation is a **level-stack** — click descends, double-tap climbs back up:
 
-- **Single tap** — start talking (mic opens, streams to Soniox); tap again to stop and send into the topic.
-- **Double tap** — while listening, cancel the utterance; in a conversation, go back to the topic list;
-  on the topic list, do nothing.
-- **Swipe up / down** — scroll back through the conversation / return to the latest.
+- **Single tap** — in a chat, start talking (mic opens, streams to Soniox); tap again to stop and send.
+  On a list, select the highlighted row to descend a level.
+- **Double tap** — while listening, cancel the utterance; otherwise go **up one level** (chat → topic
+  list or conversation list; topic list → conversation list; on the conversation list, nothing).
+- **Swipe up / down** — scroll back through the chat / return to the latest.
 
-Launch drops you on the **topic picker** — the glasses fetch your group's forum topics live (real
-Telegram names) and you pick one. Each topic keeps its own scrollable log, seeded from the topic's
-recent Telegram history.
+Launch drops you on the **conversation list** — the up-to-five conversations you pinned in the app.
+Selecting one descends: a 1:1, bot, channel, or non-forum group goes **straight to the chat**; a forum
+group opens its **topic list** (live Telegram topic names) to pick from first. Each chat keeps its own
+scrollable log, seeded from its recent Telegram history. Exit is host-driven — long-press → "Leave app?".
 
 ## Settings (entered in the companion-app WebView, persisted on-device)
 
@@ -38,18 +42,18 @@ A **step-by-step Telegram onboarding wizard**:
 1. **API ID + API Hash** — one-time, from [my.telegram.org](https://my.telegram.org) → "API development tools".
 2. **Phone** → **Send code** → enter the code → **2FA password** (if you have one) → **Connected as @you**.
 
-Plus two fields:
+Then:
 
-| Field          | Example          | Used as                                                                  |
-| -------------- | ---------------- | ------------------------------------------------------------------------ |
-| Group ID       | `-1001234567890` | the supergroup whose topics the glasses list (copy from the Telegram UI) |
-| Soniox API key | `sox_…`          | Soniox real-time STT auth                                                |
+| Setting        | What it does                                                                                                                                                                       |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Soniox API key | Soniox real-time STT auth (`sox_…`)                                                                                                                                                |
+| Conversations  | Once connected, search your recent chats and **tap the star to pin up to 5**. 1:1s, bots, postable channels, and groups are pinnable; pin order is the order shown on the glasses. |
 
 The Telegram **session string** (minted by the login, full account access) and the other values are
 saved via the SDK's `setLocalStorage` (the only reliable persistence in the Even App WebView). Until
-you're fully set up (Soniox key + Telegram login + a group id) the glasses show a single
-`Configure ERGram in the app` prompt; once ready they open the **topic list** — pick a topic, then tap
-to talk.
+you're fully set up (Soniox key + Telegram login + at least one pinned conversation) the glasses show a
+short setup prompt (`Add your Soniox key…` / `Connect Telegram…` / `Pin conversations…`); once ready
+they open the **conversation list** — pick a conversation, then tap to talk.
 
 ## Develop
 
@@ -68,9 +72,14 @@ Vite, then connects to `http://localhost:5173`). To capture from a specific host
 
 GramJS needs Node globals in the browser: `vite-plugin-node-polyfills` provides process/global, and
 `src/buffer-global.ts` supplies a single `Buffer` from the `buffer` package (`resolve.dedupe: ['buffer']`
+plus `pnpm.overrides.buffer`) — without this, GramJS's `instanceof Buffer` cross-fails at 2FA. The
+client uses `useWSS: true`.
 
-- `pnpm.overrides.buffer`) — without this, GramJS's `instanceof Buffer` cross-fails at 2FA. The client
-  uses `useWSS: true`.
+### Quality gate
+
+`pnpm lint` (ESLint + `@typescript-eslint`) and `pnpm typecheck` (`tsc --noEmit`) run automatically on
+every commit via a Husky pre-commit hook (lint-staged formats with Prettier, then the whole project is
+typechecked). `pnpm test` runs the Vitest suite over the pure logic modules.
 
 ## Build / package
 
@@ -79,18 +88,26 @@ pnpm run build        # typecheck + vite build → dist/
 pnpm run pack         # → ergram.ehpk for the glasses
 ```
 
-> The Even Hub sandbox enforces `app.json`'s `network.whitelist`. Soniox and Telegram's DC endpoints
-> (`wss://{pluto,venus,aurora,vesta,flora}.web.telegram.org`) are listed; dev origins too.
+> The Even Hub sandbox enforces `app.json`'s `network.whitelist`. Soniox, `my.telegram.org`, and
+> Telegram's DC endpoints (`wss://{pluto,venus,aurora,vesta,flora}.web.telegram.org`) are listed; dev
+> origins too.
 
 ## Layout
 
-- `src/main.ts` — bridge init, glasses page, PTT state machine, topic picker, event routing
+- `src/main.ts` — bridge init, glasses page, PTT state machine, level-stack navigation
+  (conversations → topics → chat), event routing
 - `src/asr/stt.ts` — Soniox real-time WebSocket client
-- `src/telegram/client.ts` — GramJS userbot (login / topics / send / history / subscribe)
+- `src/telegram/client.ts` — GramJS userbot (login / dialogs / topics / send / history / subscribe)
 - `src/telegram/topics.ts` · `messages.ts` — forum-topic + message→turn helpers (pure)
+- `src/pins.ts` — pinned-conversation list: add/remove, cap at 5, serialize for the store (pure)
+- `src/dialogs.ts` — classify & filter Telegram dialogs into the pinnable set (pure)
+- `src/conversation-state.ts` — composite `(chatId, topicId)` history keying + incoming routing (pure)
+- `src/topic-selection.ts` — forum-topic picker logic (pure)
+- `src/conversation.ts` — flat attributed chat log: upsert / reconcile / seed (pure)
+- `src/glasses/render.ts` · `wrap.ts` — on-glasses conversation rendering
 - `src/buffer-global.ts` — the single global `Buffer` GramJS needs
-- `src/settings.ts` — load/save settings via the Even Hub store
-- `src/ui.ts` — companion-app WebView panel (onboarding wizard + group id + transcript/reply)
+- `src/settings.ts` — load/save settings (Soniox key, Telegram creds, pinned conversations)
+- `src/ui.ts` — companion-app WebView panel (onboarding wizard + conversation pinning)
 
 ## License
 
