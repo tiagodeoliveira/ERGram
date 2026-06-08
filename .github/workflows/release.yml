@@ -42,7 +42,7 @@ jobs:
           fi
 
       - name: Build and pack .ehpk
-        run: pnpm run pack
+        run: pnpm run ehpk
 
       - name: Verify artifact exists
         run: ls -lh ergram.ehpk
