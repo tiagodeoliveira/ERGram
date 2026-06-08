@@ -27,13 +27,15 @@ and navigation is a **level-stack** — click descends, double-tap climbs back u
 - **Single tap** — in a chat, start talking (mic opens, streams to Soniox); tap again to stop and send.
   On a list, select the highlighted row to descend a level.
 - **Double tap** — while listening, cancel the utterance; otherwise go **up one level** (chat → topic
-  list or conversation list; topic list → conversation list; on the conversation list, nothing).
+  list or conversation list; topic list → conversation list). On the conversation list (home) there's no
+  level above, so a double tap raises the host's **"Leave app?"** confirmation.
 - **Swipe up / down** — scroll back through the chat / return to the latest.
 
 Launch drops you on the **conversation list** — the up-to-five conversations you pinned in the app.
 Selecting one descends: a 1:1, bot, channel, or non-forum group goes **straight to the chat**; a forum
 group opens its **topic list** (live Telegram topic names) to pick from first. Each chat keeps its own
-scrollable log, seeded from its recent Telegram history. Exit is host-driven — long-press → "Leave app?".
+scrollable log, seeded from its recent Telegram history. To exit, double-tap on the home list (or
+long-press) → "Leave app?".
 
 ## Settings (entered in the companion-app WebView, persisted on-device)
 
@@ -85,12 +87,15 @@ typechecked). `pnpm test` runs the Vitest suite over the pure logic modules.
 
 ```bash
 pnpm run build        # typecheck + vite build → dist/
-pnpm run pack         # → ergram.ehpk for the glasses
+pnpm ehpk             # → ergram.ehpk for the glasses
 ```
 
 > The Even Hub sandbox enforces `app.json`'s `network.whitelist`. Soniox, `my.telegram.org`, and
 > Telegram's DC endpoints (`wss://{pluto,venus,aurora,vesta,flora}.web.telegram.org`) are listed; dev
-> origins too.
+> origins too. `pnpm ehpk` runs `scripts/check-network-whitelist.mjs` first — it scans the built bundle
+> for URL literals and fails if any active endpoint isn't covered, reproducing the portal's submission
+> scan locally. GramJS's runtime transport templates (`wss://${e}:${r}/apiws…`) and vendored doc strings
+> are pre-classified as known-safe there, so the gate only trips on a genuinely new un-whitelisted host.
 
 ## Layout
 

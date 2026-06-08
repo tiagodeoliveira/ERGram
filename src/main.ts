@@ -453,9 +453,15 @@ function selectTopic(index: number): void {
   void enterChat(f.conv, topic)
 }
 
-// Double-tap: climb one level. No-op at the conversation list (home).
+// Double-tap: climb one level. At the conversation list (home) there's no level
+// above, so it surfaces the host's exit-confirmation dialog instead. Mode 1 only
+// *shows* the dialog — if the user confirms, the host fires SYSTEM_EXIT_EVENT and
+// we clean up there; if they cancel, the app stays live. So don't tear down here.
 function popLevel(): void {
-  if (stack.length <= 1) return
+  if (stack.length <= 1) {
+    void bridge.shutDownPageContainer(1)
+    return
+  }
   stack.pop()
   void renderTop()
 }
