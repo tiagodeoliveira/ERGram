@@ -50,6 +50,19 @@ export default [
     },
   },
   {
+    // Node build/CI scripts (e.g. the network-whitelist guard) run under Node, not
+    // the browser, so they need the Node globals the recommended config doesn't grant.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+      },
+    },
+  },
+  {
     ignores: ['node_modules/**', 'dist/**', '*.config.ts', '*.config.mjs'],
   },
   prettier,
