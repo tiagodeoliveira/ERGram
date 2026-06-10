@@ -96,6 +96,21 @@ let settings = await loadSettings(bridge)
 
 // ── Telegram client (single module-level instance) ──
 let tg: TgClient | null = null
+let unsubscribeTg: (() => void) | null = null
+
+function detachTelegram(): void {
+  try {
+    unsubscribeTg?.()
+  } catch {
+    // Best-effort cleanup; the client may already be disconnected.
+  }
+  unsubscribeTg = null
+}
+
+function attachTelegram(client: TgClient): void {
+  detachTelegram()
+  unsubscribeTg = client.subscribe(onTgMessage)
+}
 
 // ── Conversation state. Each (chatId, topicId) keeps its own scrollable log. ──
 const histories = new Map<string, Msg[]>()
@@ -132,7 +147,7 @@ if (hasTelegram(settings)) {
     })
     const ok = await tg.resume()
     if (ok) {
-      tg.subscribe(onTgMessage)
+      attachTelegram(tg)
     } else {
       tg = null
     }
@@ -150,17 +165,28 @@ const uiHandle = mountUi(settings, {
     if (mode === 'idle' && !transcriptText && !activeChat()) reflectIdle()
   },
   onTgLogin: async (creds, prompts) => {
-    tg = new TgClient(creds)
-    await tg.login(prompts)
-    const session = tg.saveSession()
+    const previous = tg
+    detachTelegram()
+    await previous?.disconnect().catch(() => undefined)
+
+    const next = new TgClient(creds)
+    try {
+      await next.login(prompts)
+    } catch (err) {
+      await next.disconnect().catch(() => undefined)
+      throw err
+    }
+
+    tg = next
+    const session = next.saveSession()
     settings = { ...settings, tgSession: session }
     await saveSettings(bridge, settings)
     uiHandle.updateSession(session)
-    tg.subscribe(onTgMessage)
+    attachTelegram(next)
     // Reflect the new state on the glasses immediately so there's no "reopen the
     // app" step after onboarding.
     if (mode === 'idle' && !transcriptText && !activeChat()) reflectIdle()
-    const me = await tg.client.getMe()
+    const me = await next.client.getMe()
     return (
       '@' +
       ((me as unknown as { username?: string; firstName?: string }).username ??
@@ -179,6 +205,7 @@ const uiHandle = mountUi(settings, {
     stt = null
 
     tg = null
+    detachTelegram()
     mode = 'idle'
     transcriptText = ''
     history = []
@@ -720,6 +747,7 @@ function cleanup() {
   cleanedUp = true
   bridge.audioControl(false)
   stt?.close()
+  detachTelegram()
   unsubscribe()
 }
 
