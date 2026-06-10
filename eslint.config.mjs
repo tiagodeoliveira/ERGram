@@ -63,7 +63,17 @@ export default [
     },
   },
   {
-    ignores: ['node_modules/**', 'dist/**', '*.config.ts', '*.config.mjs'],
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      '.remember/**',
+      '.pi/**',
+      '.claude/**',
+      '.playwright-mcp/**',
+      '.vite/**',
+      '*.config.ts',
+      '*.config.mjs',
+    ],
   },
   prettier,
 ]

@@ -11,4 +11,6 @@ dist
 .claude
 .playwright-mcp
 .vite
+.remember
+.pi
 .DS_Store

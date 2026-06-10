@@ -3,3 +3,8 @@ dist
 pnpm-lock.yaml
 *.tsbuildinfo
 *.ehpk
+.remember
+.pi
+.claude
+.playwright-mcp
+.vite
