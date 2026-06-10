@@ -27,11 +27,7 @@
         "https://venus.web.telegram.org",
         "https://aurora.web.telegram.org",
         "https://vesta.web.telegram.org",
-        "https://flora.web.telegram.org",
-        "http://192.168.5.142:5173",
-        "ws://192.168.5.142:5173",
-        "http://100.64.152.113:5173",
-        "ws://100.64.152.113:5173"
+        "https://flora.web.telegram.org"
       ]
     }
   ],
