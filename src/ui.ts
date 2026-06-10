@@ -12,6 +12,13 @@ import { filterDialogs, type Dialog } from './dialogs'
 
 export type Status = 'idle' | 'listening' | 'thinking' | 'error'
 
+export interface TgLogoutResult {
+  /** true only when Telegram confirmed auth.logOut for this session. */
+  revoked: boolean
+  /** User-facing summary of what happened. */
+  message: string
+}
+
 // Step state for the Telegram onboarding wizard.
 type Step = 'keys' | 'phone' | 'code' | 'password' | 'connected'
 
@@ -19,7 +26,7 @@ interface UiHandlers {
   onSave: (s: Settings) => void
   /** Initiates Telegram login. Resolves with the connected @username on success. */
   onTgLogin: (creds: TgCredentials, prompts: LoginPrompts) => Promise<string>
-  onTgLogout: () => void
+  onTgLogout: () => Promise<TgLogoutResult>
   /** Fetch the account's postable conversations for the pin list. */
   onLoadDialogs: () => Promise<Dialog[]>
 }
@@ -226,6 +233,11 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
         <!-- ── Telegram wizard ── -->
         <div class="tg-section">
           <div class="tg-section-head">Telegram</div>
+          <p class="security-note">
+            Telegram login creates a session string with full account access. ERGram stores it only
+            on this device through Even Hub storage; use your own device and log out/revoke if it
+            is lost or shared.
+          </p>
           <div id="tg-stepper" class="tg-stepper"></div>
 
           <!-- Step: keys -->
@@ -275,7 +287,11 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
           <!-- Step: connected -->
           <div id="step-connected" class="step">
             <div id="tg-connected-name" class="tg-connected"></div>
-            <button id="btn-logout" type="button" class="ghost">Log out</button>
+            <p class="security-note">
+              Logging out asks Telegram to revoke this app session and clears the local session
+              string. If revocation cannot be confirmed, remove it from Telegram Settings → Devices.
+            </p>
+            <button id="btn-logout" type="button" class="ghost">Log out &amp; revoke session</button>
           </div>
 
           <div id="tg-status" class="tg-status"></div>
@@ -452,14 +468,37 @@ export function mountUi(initial: Settings, handlers: UiHandlers): UiHandle {
     }
   })
 
-  // Step 'connected' — log out
-  app.querySelector<HTMLButtonElement>('#btn-logout')!.addEventListener('click', () => {
-    handlers.onTgLogout()
-    currentSession = ''
-    apiIdInput.value = ''
-    apiHashInput.value = ''
-    showStep('keys')
-    updateConvAvailability() // disconnected → hide dialog controls
+  // Step 'connected' — revoke the Telegram authorization and clear local session material.
+  const logoutBtn = app.querySelector<HTMLButtonElement>('#btn-logout')!
+  logoutBtn.addEventListener('click', () => {
+    const ok = window.confirm(
+      'Log out of Telegram on this device? ERGram will ask Telegram to revoke this app session and clear the local session string.',
+    )
+    if (!ok) return
+
+    logoutBtn.disabled = true
+    setTgStatus('', 'Revoking Telegram session…')
+    handlers
+      .onTgLogout()
+      .then((result) => {
+        currentSession = ''
+        apiIdInput.value = ''
+        apiHashInput.value = ''
+        phoneInput.value = ''
+        codeInput.value = ''
+        pwInput.value = ''
+        connectedNameEl.textContent = ''
+        showStep('keys')
+        setTgStatus(result.revoked ? 'ok' : 'error', result.message)
+        flashSaved(result.revoked ? 'Logged out' : 'Cleared locally')
+        updateConvAvailability() // disconnected → hide dialog controls
+      })
+      .catch((err: unknown) => {
+        setTgStatus('error', `Logout failed: ${(err as Error)?.message ?? err}`)
+      })
+      .finally(() => {
+        logoutBtn.disabled = false
+      })
   })
 
   // ── Save button ───────────────────────────────────────────────────────────
@@ -538,6 +577,8 @@ function injectStyles(): void {
     .tg-section-head { font-size: 12px; color: #6e6e73; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.04em; margin: 0 0 8px; }
     .tg-stepper { font-size: 11px; color: #8e8e93; margin-bottom: 10px; }
+    .security-note { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
+      background: #fff5c7; color: #6a5300; font-size: 12px; line-height: 1.45; font-weight: 500; }
     .step { display: none; }
     .step.active { display: block; }
     .step-hint { font-size: 13px; color: #6e6e73; margin: 0 0 12px; line-height: 1.5; }

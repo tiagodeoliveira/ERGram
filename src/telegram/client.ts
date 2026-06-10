@@ -78,7 +78,25 @@ export class TgClient {
   }
 
   async disconnect(): Promise<void> {
+    this._meId = null
     await this.client.disconnect()
+  }
+
+  /** Revoke the current Telegram authorization on the server, then disconnect locally. */
+  async revokeSession(): Promise<void> {
+    try {
+      // auth.logOut invalidates this MTProto authorization/key on Telegram.
+      // connect() is safe if already connected and lets logout work after a resumed session.
+      await this.client.connect()
+      await this.client.invoke(new Api.auth.LogOut())
+    } finally {
+      this._meId = null
+      try {
+        await this.client.disconnect()
+      } catch {
+        // auth.logOut can invalidate the key before disconnect finishes.
+      }
+    }
   }
 
   /** List the account's postable conversations (for the PWA pin list). */

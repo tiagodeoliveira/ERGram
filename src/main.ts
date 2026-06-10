@@ -107,6 +107,10 @@ function nextLocalId(): number {
   return localSeq--
 }
 
+function messageOf(err: unknown): string {
+  return (err as Error)?.message || String(err)
+}
+
 // ── Turn state ──
 let mode: Mode = 'idle'
 let stt: SttClient | null = null
@@ -165,10 +169,53 @@ const uiHandle = mountUi(settings, {
     )
   },
   onTgLogout: async () => {
-    await tg?.disconnect()
+    const client = tg
+    let revokeError: unknown = null
+    let revoked = false
+
+    // Stop active capture before tearing down auth.
+    await bridge.audioControl(false)
+    stt?.close()
+    stt = null
+
     tg = null
-    settings = { ...settings, tgSession: '' }
-    await saveSettings(bridge, settings)
+    mode = 'idle'
+    transcriptText = ''
+    history = []
+    stack = [{ kind: 'conversations' }]
+    topicList = []
+    histories.clear()
+
+    try {
+      if (client) {
+        await client.revokeSession()
+        revoked = true
+      }
+    } catch (err) {
+      revokeError = err
+      try {
+        await client?.disconnect()
+      } catch {
+        // Ignore local disconnect errors after a failed revoke.
+      }
+    } finally {
+      // Always remove the powerful session string from device storage. If remote
+      // revocation failed, the UI tells the user how to revoke from Telegram.
+      settings = { ...settings, tgSession: '' }
+      await saveSettings(bridge, settings)
+      uiHandle.updateSession('')
+      reflectIdle()
+    }
+
+    if (revoked) {
+      return { revoked: true, message: 'Telegram session revoked and local session cleared.' }
+    }
+
+    const detail = revokeError ? ` (${messageOf(revokeError)})` : ''
+    return {
+      revoked: false,
+      message: `Local session cleared, but Telegram did not confirm remote revocation${detail}. Remove ERGram from Telegram Settings → Devices.`,
+    }
   },
   onLoadDialogs: async () => {
     if (!tg) throw new Error('Connect Telegram first')

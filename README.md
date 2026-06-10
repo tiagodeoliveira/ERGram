@@ -57,6 +57,22 @@ you're fully set up (Soniox key + Telegram login + at least one pinned conversat
 short setup prompt (`Add your Soniox key…` / `Connect Telegram…` / `Pin conversations…`); once ready
 they open the **conversation list** — pick a conversation, then tap to talk.
 
+### Security model
+
+ERGram has no backend: audio, Soniox access, and Telegram MTProto access all originate from the
+PWA running on your device. That keeps server operations out of the trust boundary, but it means the
+device stores sensitive local secrets:
+
+- the Soniox API key, which can spend your Soniox quota;
+- the Telegram API ID/hash;
+- the GramJS Telegram session string, which authorizes this app as your Telegram account.
+
+Use ERGram only on a device you control. The **Log out & revoke session** button calls Telegram
+`auth.logOut` for the current MTProto authorization and clears the local session string from Even Hub
+storage. If the device is lost, shared, or logout cannot confirm revocation, also remove the session
+from Telegram → Settings → Devices and rotate the Soniox key. Microphone audio is streamed to Soniox
+for transcription while you are listening.
+
 ## Develop
 
 ```bash
