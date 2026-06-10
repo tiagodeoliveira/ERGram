@@ -581,10 +581,11 @@ async function cancelListening(): Promise<void> {
 
 async function stopListening(): Promise<void> {
   await bridge.audioControl(false)
-  stt?.close()
+  const activeStt = stt
   stt = null
 
-  const text = transcriptText.trim()
+  const finalSnap = await activeStt?.finish()
+  const text = (finalSnap ? finalSnap.finalText + finalSnap.interimText : transcriptText).trim()
   if (!text) {
     reflectIdle()
     return
