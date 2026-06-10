@@ -8,7 +8,7 @@ export interface TgMessage {
   bot: boolean // sent by a bot
   from: string // sender display label (see senderLabel); '' when mine
   chatId: string // marked chat id, e.g. "-1001234567890" (for routing)
-  topicId: number // forum thread id (for routing)
+  topicId: number // forum thread id for forums; 1 for ordinary/non-forum chats
   date: number
 }
 
@@ -24,10 +24,16 @@ export function senderLabel(s: { firstName?: string; username?: string; bot?: bo
 }
 
 // Forum thread id for a message. Telegram puts the topic root in replyToTopId
-// for replies inside a topic, in replyToMsgId for the topic's top-level posts,
-// and omits the header entirely for the General topic (id 1).
-export function topicIdOf(replyTo?: { replyToTopId?: number; replyToMsgId?: number }): number {
-  return replyTo?.replyToTopId ?? replyTo?.replyToMsgId ?? 1
+// for replies inside a topic. For a topic's top-level post it may only expose
+// replyToMsgId, but that is safe to treat as a topic id only when Telegram marks
+// the reply header as a forum topic. Ordinary non-forum replies also have
+// replyToMsgId; those must stay in the main chat route (topic id 1).
+export function topicIdOf(replyTo?: {
+  replyToTopId?: number
+  replyToMsgId?: number
+  forumTopic?: boolean
+}): number {
+  return replyTo?.replyToTopId ?? (replyTo?.forumTopic ? replyTo.replyToMsgId : undefined) ?? 1
 }
 
 // Map a chronological message list to the flat log, dropping empty (service)

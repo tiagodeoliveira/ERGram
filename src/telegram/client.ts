@@ -179,7 +179,7 @@ export class TgClient {
       getSender?: () => Promise<
         { firstName?: string; username?: string; bot?: boolean } | undefined
       >
-      replyTo?: { replyToTopId?: number; replyToMsgId?: number }
+      replyTo?: { replyToTopId?: number; replyToMsgId?: number; forumTopic?: boolean }
     }
 
     // Prefer the inlined sender; fetch it only when the update didn't carry one.

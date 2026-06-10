@@ -23,8 +23,11 @@ describe('topicIdOf', () => {
   it('prefers replyToTopId (reply within a topic)', () => {
     expect(topicIdOf({ replyToTopId: 55, replyToMsgId: 10 })).toBe(55)
   })
-  it('falls back to replyToMsgId (top-level message in a topic)', () => {
-    expect(topicIdOf({ replyToMsgId: 10 })).toBe(10)
+  it('uses replyToMsgId only when Telegram marks the header as a forum topic', () => {
+    expect(topicIdOf({ replyToMsgId: 10, forumTopic: true })).toBe(10)
+  })
+  it('keeps ordinary non-forum replies in the main chat route', () => {
+    expect(topicIdOf({ replyToMsgId: 10 })).toBe(1)
   })
   it('treats a missing reply header as the General topic (1)', () => {
     expect(topicIdOf(undefined)).toBe(1)
